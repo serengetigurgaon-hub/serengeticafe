@@ -3,8 +3,9 @@ import {
   ChefHat, UtensilsCrossed, Receipt, Users, LogOut, Plus, Minus, Trash2,
   Check, Clock, Flame, Zap, Printer, X, Pencil, Save, ArrowRight,
   Search, ClipboardList, ShieldCheck, CircleDot, ImagePlus, Loader2, Leaf,
-  ShoppingBag, Home
+  ShoppingBag, Home, LayoutDashboard, TrendingUp, Utensils
 } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from "recharts";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
 
@@ -338,7 +339,7 @@ function LoginScreen({ profiles, setProfiles }) {
 function Shell({ currentUser, onLogout, syncedAt, children }) {
   return (
     <div className="relative z-10 min-h-screen flex flex-col">
-      <header className="bg-[#16261F]/92 backdrop-blur-md text-white no-print sticky top-0 z-30 shadow-lg">
+      <header className="bg-[#16261F] text-white no-print sticky top-0 z-30 shadow-lg">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <img src={BRAND.logo} alt="Serengeti" className="h-7 sm:h-8 w-auto shrink-0" />
@@ -361,7 +362,7 @@ function Shell({ currentUser, onLogout, syncedAt, children }) {
       </header>
       <main className="flex-1">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-4">
-          <div className="bg-[#FAF8F2]/97 backdrop-blur-sm rounded-3xl shadow-2xl p-4 sm:p-6 pb-24 sm:pb-6 min-h-[72vh]">
+          <div className="bg-[#FAF8F2] rounded-3xl shadow-2xl p-4 sm:p-6 pb-24 sm:pb-6 min-h-[72vh]">
             {children}
           </div>
         </div>
@@ -434,7 +435,7 @@ function NavTabs({ tabs, current, onChange }) {
           </button>
         ))}
       </div>
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/97 backdrop-blur-md border-t border-[#F0EBDD] shadow-[0_-4px_24px_rgba(0,0,0,0.1)] flex justify-around py-1.5 no-print" style={{ paddingBottom: "max(0.4rem, env(safe-area-inset-bottom))" }}>
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-[#F0EBDD] shadow-[0_-4px_24px_rgba(0,0,0,0.1)] flex justify-around py-1.5 no-print" style={{ paddingBottom: "max(0.4rem, env(safe-area-inset-bottom))" }}>
         {tabs.map(([key, label, Icon]) => (
           <button key={key} onClick={() => onChange(key)} className="flex flex-col items-center gap-0.5 px-3 py-1.5">
             <Icon size={20} className={current === key ? "text-[#C9A66B]" : "text-[#9C9686]"} />
@@ -512,7 +513,6 @@ function DishCard({ item, qty, onAdd, onRemove }) {
 // SERVER DASHBOARD
 // ---------------------------------------------------------------------------
 function ServerDashboard({ currentUser, menu, orders, setOrders }) {
-  const [tab, setTab] = useState("new");
   const [table, setTable] = useState("");
   const [urgent, setUrgent] = useState(false);
   const [quick, setQuick] = useState(false);
@@ -560,87 +560,97 @@ function ServerDashboard({ currentUser, menu, orders, setOrders }) {
     setCart([]); setUrgent(false); setQuick(false); setTable("");
   };
 
-  const myActiveOrders = orders.filter(o => !o.billed).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+  // Every logged-in device shares the same Firestore data, so this list is
+  // already the same "all active orders, all tables, all servers" for everyone.
+  const activeOrders = orders.filter(o => !o.billed).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const disabledReason = !table.trim() && cart.length === 0
+    ? "Enter a table number and add at least one dish"
+    : !table.trim()
+    ? "Enter a table number"
+    : cart.length === 0
+    ? "Add at least one dish"
+    : "";
 
   return (
     <div>
-      <NavTabs tabs={[["new", "Order", ShoppingBag], ["active", "Active", Clock]]} current={tab} onChange={setTab} />
-      {tab === "new" ? (
-        <div className="grid md:grid-cols-3 gap-6">
-          <div className="md:col-span-2">
-            <div className="flex flex-wrap gap-2 sm:gap-3 mb-4">
-              <input value={table} onChange={(e) => setTable(e.target.value)} placeholder="Table number" inputMode="numeric"
-                className="border border-[#EAE4D3] bg-white px-4 py-2.5 rounded-full text-sm font-ticket w-32 sm:w-40 shadow-sm" />
-              <button onClick={() => setUrgent(!urgent)}
-                className={`px-4 py-2.5 rounded-full text-xs font-ui font-medium uppercase tracking-widest flex items-center gap-1.5 shadow-sm transition ${urgent ? "bg-[#C1694F] text-white" : "bg-white text-[#5c5648]"}`}>
-                <Flame size={14} /> Urgent
-              </button>
-              <button onClick={() => setQuick(!quick)}
-                className={`px-4 py-2.5 rounded-full text-xs font-ui font-medium uppercase tracking-widest flex items-center gap-1.5 shadow-sm transition ${quick ? "bg-[#C9A66B] text-white" : "bg-white text-[#5c5648]"}`}>
-                <Zap size={14} /> Quick
-              </button>
-            </div>
-            <div className="relative mb-4">
-              <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#9C9686]" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search the menu…"
-                className="w-full border border-[#EAE4D3] bg-white pl-11 pr-4 py-3 rounded-full text-sm shadow-sm" />
-            </div>
-            <CategoryChips categories={categories} selected={category} onSelect={setCategory} />
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {available.length === 0 && <p className="text-sm text-[#9C9686] font-ui col-span-full">No dishes found.</p>}
-              {available.map((item) => (
-                <DishCard key={item.id} item={item} qty={cartQtyFor(item.id)} onAdd={addToCart} onRemove={removeOneFromCart} />
+      <div className="grid md:grid-cols-3 gap-6">
+        <div className="md:col-span-2">
+          <div className="font-display text-xl font-600 text-[#16261F] mb-3 flex items-center gap-2"><ShoppingBag size={18} /> New Order</div>
+          <div className="flex flex-wrap gap-2 sm:gap-3 mb-4">
+            <input value={table} onChange={(e) => setTable(e.target.value)} placeholder="Table number" inputMode="numeric"
+              className="border border-[#EAE4D3] bg-white px-4 py-2.5 rounded-full text-sm font-ticket w-32 sm:w-40 shadow-sm" />
+            <button onClick={() => setUrgent(!urgent)}
+              className={`px-4 py-2.5 rounded-full text-xs font-ui font-medium uppercase tracking-widest flex items-center gap-1.5 shadow-sm transition ${urgent ? "bg-[#C1694F] text-white" : "bg-white text-[#5c5648]"}`}>
+              <Flame size={14} /> Urgent
+            </button>
+            <button onClick={() => setQuick(!quick)}
+              className={`px-4 py-2.5 rounded-full text-xs font-ui font-medium uppercase tracking-widest flex items-center gap-1.5 shadow-sm transition ${quick ? "bg-[#C9A66B] text-white" : "bg-white text-[#5c5648]"}`}>
+              <Zap size={14} /> Quick
+            </button>
+          </div>
+          <div className="relative mb-4">
+            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#9C9686]" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search the menu…"
+              className="w-full border border-[#EAE4D3] bg-white pl-11 pr-4 py-3 rounded-full text-sm shadow-sm" />
+          </div>
+          <CategoryChips categories={categories} selected={category} onSelect={setCategory} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
+            {available.length === 0 && <p className="text-sm text-[#9C9686] font-ui col-span-full">No dishes found.</p>}
+            {available.map((item) => (
+              <DishCard key={item.id} item={item} qty={cartQtyFor(item.id)} onAdd={addToCart} onRemove={removeOneFromCart} />
+            ))}
+          </div>
+
+          <div className="font-display text-xl font-600 text-[#16261F] mb-3 flex items-center gap-2 no-print"><Clock size={18} /> Live Orders — All Tables</div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {activeOrders.length === 0 && <p className="text-sm text-[#9C9686] font-ui col-span-full">No active orders right now.</p>}
+            {activeOrders.map((o) => <OrderTicket key={o.id} order={o} />)}
+          </div>
+        </div>
+
+        <div>
+          <div id="cart-panel" className="bg-white rounded-2xl shadow-md p-4 sm:sticky sm:top-4 scroll-mt-4">
+            <div className="font-display text-lg font-600 text-[#16261F] mb-3 flex items-center gap-2"><ShoppingBag size={16} /> Order for Table {table || "—"}</div>
+            {cart.length === 0 && <p className="text-xs text-[#9C9686] font-ui">Tap "Add" on a dish to start the order.</p>}
+            <div className="space-y-3 mb-3 max-h-[50vh] overflow-y-auto">
+              {cart.map((l) => (
+                <div key={l.id} className="border-b border-dashed border-[#F0EBDD] pb-2">
+                  <div className="flex items-center justify-between text-sm gap-2">
+                    <span className="text-[#16261F] truncate">{l.name}</span>
+                    <button onClick={() => removeCartLine(l.id)} className="shrink-0"><Trash2 size={14} className="text-[#C1694F]" /></button>
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => updateCartLine(l.id, { qty: Math.max(1, l.qty - 1) })} className="w-6 h-6 flex items-center justify-center bg-[#F0EBDD] rounded-full"><Minus size={12} /></button>
+                      <span className="font-ticket text-sm w-4 text-center">{l.qty}</span>
+                      <button onClick={() => updateCartLine(l.id, { qty: l.qty + 1 })} className="w-6 h-6 flex items-center justify-center bg-[#F0EBDD] rounded-full"><Plus size={12} /></button>
+                    </div>
+                    <span className="font-ticket text-sm text-[#8a6f42]">{money(l.price * l.qty)}</span>
+                  </div>
+                  <input value={l.remarks} onChange={(e) => updateCartLine(l.id, { remarks: e.target.value })} placeholder="remarks e.g. no onions"
+                    className="w-full mt-1.5 border border-[#F0EBDD] rounded-xl px-2.5 py-1.5 text-xs font-ticket" />
+                </div>
               ))}
             </div>
-          </div>
-
-          <div>
-            <div id="cart-panel" className="bg-white rounded-2xl shadow-md p-4 sm:sticky sm:top-4 scroll-mt-4">
-              <div className="font-display text-lg font-600 text-[#16261F] mb-3 flex items-center gap-2"><ShoppingBag size={16} /> Order for Table {table || "—"}</div>
-              {cart.length === 0 && <p className="text-xs text-[#9C9686] font-ui">Tap "Add" on a dish to start the order.</p>}
-              <div className="space-y-3 mb-3 max-h-[50vh] overflow-y-auto">
-                {cart.map((l) => (
-                  <div key={l.id} className="border-b border-dashed border-[#F0EBDD] pb-2">
-                    <div className="flex items-center justify-between text-sm gap-2">
-                      <span className="text-[#16261F] truncate">{l.name}</span>
-                      <button onClick={() => removeCartLine(l.id)} className="shrink-0"><Trash2 size={14} className="text-[#C1694F]" /></button>
-                    </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => updateCartLine(l.id, { qty: Math.max(1, l.qty - 1) })} className="w-6 h-6 flex items-center justify-center bg-[#F0EBDD] rounded-full"><Minus size={12} /></button>
-                        <span className="font-ticket text-sm w-4 text-center">{l.qty}</span>
-                        <button onClick={() => updateCartLine(l.id, { qty: l.qty + 1 })} className="w-6 h-6 flex items-center justify-center bg-[#F0EBDD] rounded-full"><Plus size={12} /></button>
-                      </div>
-                      <span className="font-ticket text-sm text-[#8a6f42]">{money(l.price * l.qty)}</span>
-                    </div>
-                    <input value={l.remarks} onChange={(e) => updateCartLine(l.id, { remarks: e.target.value })} placeholder="remarks e.g. no onions"
-                      className="w-full mt-1.5 border border-[#F0EBDD] rounded-xl px-2.5 py-1.5 text-xs font-ticket" />
-                  </div>
-                ))}
+            {cart.length > 0 && (
+              <div className="flex justify-between font-display font-600 text-base mb-3 text-[#16261F]">
+                <span>Total</span>
+                <span>{money(cartTotal)}</span>
               </div>
-              {cart.length > 0 && (
-                <div className="flex justify-between font-display font-600 text-base mb-3 text-[#16261F]">
-                  <span>Total</span>
-                  <span>{money(cartTotal)}</span>
-                </div>
-              )}
-              <button onClick={submitOrder} disabled={!table.trim() || cart.length === 0}
-                className="w-full bg-[#16261F] disabled:opacity-30 text-white py-3 rounded-full text-sm font-ui font-semibold uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg">
-                Send to Kitchen <ArrowRight size={16} />
-              </button>
-            </div>
+            )}
+            <button onClick={submitOrder} disabled={!table.trim() || cart.length === 0}
+              className="w-full bg-[#16261F] disabled:opacity-30 text-white py-3 rounded-full text-sm font-ui font-semibold uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg">
+              Send to Kitchen <ArrowRight size={16} />
+            </button>
+            {disabledReason && <p className="text-[10px] text-[#9C9686] font-ui text-center mt-2">{disabledReason}</p>}
           </div>
         </div>
-      ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {myActiveOrders.length === 0 && <p className="text-sm text-[#9C9686] font-ui">No active orders.</p>}
-          {myActiveOrders.map((o) => <OrderTicket key={o.id} order={o} />)}
-        </div>
-      )}
+      </div>
 
-      {tab === "new" && cart.length > 0 && (
+      {cart.length > 0 && (
         <button onClick={() => document.getElementById("cart-panel")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-          className="sm:hidden fixed bottom-16 left-3 right-3 z-30 bg-[#16261F] text-white rounded-full shadow-2xl px-5 py-3.5 flex items-center justify-between no-print">
+          className="sm:hidden fixed bottom-3 left-3 right-3 z-30 bg-[#16261F] text-white rounded-full shadow-2xl px-5 py-3.5 flex items-center justify-between no-print">
           <span className="font-ui text-sm font-medium">{cartCount} item{cartCount !== 1 ? "s" : ""} · {money(cartTotal)}</span>
           <span className="font-ui text-sm font-semibold flex items-center gap-1">View Order <ArrowRight size={14} /></span>
         </button>
@@ -702,9 +712,9 @@ function ChefDashboard({ orders, setOrders }) {
 // ADMIN DASHBOARD (owner / manager)
 // ---------------------------------------------------------------------------
 function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, orders, setOrders, bills, setBills }) {
-  const tabsBase = [["menu", "Menu", UtensilsCrossed], ["orders", "Orders", Clock], ["billing", "Billing", Receipt]];
+  const tabsBase = [["dashboard", "Dashboard", LayoutDashboard], ["menu", "Menu", UtensilsCrossed], ["orders", "Orders", Clock], ["billing", "Billing", Receipt]];
   const tabs = currentUser.role === "owner" ? [...tabsBase, ["staff", "Staff", Users]] : tabsBase;
-  const [tab, setTab] = useState("menu");
+  const [tab, setTab] = useState("dashboard");
 
   return (
     <div>
@@ -719,6 +729,7 @@ function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, ord
       </div>
       <NavTabs tabs={tabs} current={tab} onChange={setTab} />
       <div>
+        {tab === "dashboard" && <AnalyticsDashboard orders={orders} menu={menu} />}
         {tab === "menu" && <MenuManager menu={menu} setMenu={setMenu} />}
         {tab === "orders" && <OrdersOverview orders={orders} />}
         {tab === "billing" && <Billing orders={orders} setOrders={setOrders} bills={bills} setBills={setBills} />}
@@ -870,6 +881,121 @@ function MenuManager({ menu, setMenu }) {
           </form>
           <p className="text-[11px] text-[#9C9686] font-ui mt-3">Every dish needs a photo — changes appear for servers immediately.</p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function KpiCard({ label, value, icon: Icon, tint }) {
+  return (
+    <div className="bg-white rounded-2xl shadow-sm p-4 flex items-center gap-3">
+      <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: `${tint}22` }}>
+        <Icon size={18} style={{ color: tint }} />
+      </div>
+      <div className="min-w-0">
+        <div className="font-display text-2xl font-600 text-[#16261F] leading-none">{value}</div>
+        <div className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] mt-1 font-medium">{label}</div>
+      </div>
+    </div>
+  );
+}
+
+const CHART_COLORS = ["#C9A66B", "#7C8F5E", "#5B8FA3", "#C1694F", "#9C9686", "#8a6f42"];
+
+function AnalyticsDashboard({ orders, menu }) {
+  const activeOrders = orders.filter((o) => !o.billed);
+  const activeTables = [...new Set(activeOrders.map((o) => o.table))];
+
+  const statusCounts = STATUS_FLOW.reduce((acc, s) => {
+    acc[s] = activeOrders.filter((o) => o.status === s).length;
+    return acc;
+  }, {});
+  const statusData = STATUS_FLOW.map((s) => ({ name: STATUS_LABEL[s], value: statusCounts[s] })).filter((d) => d.value > 0);
+
+  const dishTally = {};
+  orders.forEach((o) => o.items.forEach((it) => {
+    dishTally[it.name] = (dishTally[it.name] || 0) + it.qty;
+  }));
+  const topDishes = Object.entries(dishTally)
+    .map(([name, qty]) => ({ name, qty }))
+    .sort((a, b) => b.qty - a.qty)
+    .slice(0, 8);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard label="Total Orders" value={orders.length} icon={ClipboardList} tint="#5B8FA3" />
+        <KpiCard label="Active Orders" value={activeOrders.length} icon={Clock} tint="#C9A66B" />
+        <KpiCard label="Active Tables" value={activeTables.length} icon={Utensils} tint="#7C8F5E" />
+        <KpiCard label="Dishes on Menu" value={menu.length} icon={UtensilsCrossed} tint="#C1694F" />
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm p-4">
+          <div className="font-display text-lg font-600 text-[#16261F] mb-3 flex items-center gap-2"><TrendingUp size={16} /> Best-Selling Dishes</div>
+          {topDishes.length === 0 ? (
+            <p className="text-sm text-[#9C9686] font-ui">No orders yet — this fills in once servers start sending orders.</p>
+          ) : (
+            <div style={{ width: "100%", height: 260 }}>
+              <ResponsiveContainer>
+                <BarChart data={topDishes} layout="vertical" margin={{ left: 10, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F0EBDD" horizontal={false} />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#9C9686" }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: "#16261F" }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #F0EBDD", fontSize: 12 }} />
+                  <Bar dataKey="qty" name="Sold" fill="#C9A66B" radius={[0, 8, 8, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm p-4">
+          <div className="font-display text-lg font-600 text-[#16261F] mb-3">Active Orders by Status</div>
+          {statusData.length === 0 ? (
+            <p className="text-sm text-[#9C9686] font-ui">Nothing in progress right now.</p>
+          ) : (
+            <div style={{ width: "100%", height: 200 }}>
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={statusData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={75} paddingAngle={3}>
+                    {statusData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #F0EBDD", fontSize: 12 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 justify-center">
+            {statusData.map((d, i) => (
+              <div key={d.name} className="flex items-center gap-1.5 text-xs font-ui text-[#5c5648]">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }} />
+                {d.name} ({d.value})
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm p-4">
+        <div className="font-display text-lg font-600 text-[#16261F] mb-3">Tables Currently Active</div>
+        {activeTables.length === 0 ? (
+          <p className="text-sm text-[#9C9686] font-ui">No tables have open orders right now.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {activeTables.map((t) => {
+              const tOrders = activeOrders.filter((o) => o.table === t);
+              const isUrgent = tOrders.some((o) => o.urgent);
+              return (
+                <div key={t} className={`rounded-xl p-3 border ${isUrgent ? "border-[#C1694F]/40 bg-[#C1694F]/5" : "border-[#F0EBDD] bg-[#FAF8F2]"}`}>
+                  <div className="font-display text-xl font-600 text-[#16261F]">Table {t}</div>
+                  <div className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] mt-1">{tOrders.length} order{tOrders.length !== 1 ? "s" : ""}</div>
+                  {isUrgent && <div className="mt-1"><Tag tone="urgent">Rush</Tag></div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
