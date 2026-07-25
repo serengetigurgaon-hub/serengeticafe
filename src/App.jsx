@@ -112,6 +112,10 @@ export default function App() {
   const [syncedAt, setSyncedAt] = useState(null);
   const [globalView, setGlobalView] = useState("home");
 
+  // Public read-only menu — reached via a plain link or QR code, no login
+  // needed. Example: https://yoursite.github.io/serengeticafe/?menu=1
+  const isPublicMenu = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("menu") === "1";
+
   useEffect(() => {
     const markLoaded = (k) => setLoaded((prev) => ({ ...prev, [k]: true }));
     const unsubs = [
@@ -143,6 +147,16 @@ export default function App() {
   // everyone else gets a small toggle to switch into "Take Order" mode.
   const showOrderToggle = currentUser && currentUser.role !== "server";
   const effectiveView = currentUser && currentUser.role === "server" ? "order" : globalView;
+
+  if (isPublicMenu) {
+    return (
+      <div className="relative min-h-screen">
+        <AmbientBackground />
+        <FontStyles />
+        <PublicMenu menu={menu} loading={loading} />
+      </div>
+    );
+  }
 
   return (
     <div className="relative min-h-screen">
@@ -186,7 +200,7 @@ export default function App() {
                 />
               )}
               {currentUser.role === "chef" && (
-                <ChefDashboard orders={orders} setOrders={persist.orders} />
+                <ChefDashboard orders={orders} setOrders={persist.orders} menu={menu} setMenu={persist.menu} />
               )}
             </>
           )}
@@ -237,8 +251,93 @@ function roleColor(role) {
 }
 
 // ---------------------------------------------------------------------------
+// Public read-only menu — no login required. Reached via a plain link or the
+// QR code shown on the staff login screen (?menu=1 in the URL).
+// ---------------------------------------------------------------------------
+function PublicMenu({ menu, loading }) {
+  const [category, setCategory] = useState("All");
+  const available = menu.filter((m) => m.available !== false);
+  const categories = [...new Set(available.map((m) => m.category))];
+  const filtered = category === "All" ? available : available.filter((m) => m.category === category);
+  const byCategory = filtered.reduce((acc, m) => { (acc[m.category] = acc[m.category] || []).push(m); return acc; }, {});
+
+  const staffLoginUrl = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("menu");
+    return url.toString();
+  };
+
+  return (
+    <div className="relative z-10 min-h-screen flex flex-col items-center px-4 py-8 sm:py-10">
+      <div className="flex flex-col items-center mb-6 text-center">
+        <img src={BRAND.logo} alt="Serengeti" className="h-14 sm:h-16 w-auto mb-3 drop-shadow-lg" />
+        <h1 className="font-display text-4xl sm:text-5xl font-600 text-white tracking-tight drop-shadow">Serengeti</h1>
+        <p className="font-ui text-[10px] sm:text-xs text-[#C9A66B] uppercase tracking-[0.35em] mt-1.5 font-medium">The Eden Park · Menu</p>
+      </div>
+
+      <div className="w-full max-w-4xl bg-[#FAF8F2] rounded-3xl shadow-2xl p-4 sm:p-6">
+        {loading ? (
+          <p className="text-sm text-[#9C9686] font-ui text-center py-10">Loading menu…</p>
+        ) : available.length === 0 ? (
+          <p className="text-sm text-[#9C9686] font-ui text-center py-10">The menu isn't published yet — please check back soon.</p>
+        ) : (
+          <>
+            {categories.length > 1 && <CategoryChips categories={categories} selected={category} onSelect={setCategory} />}
+            <div className="space-y-6">
+              {Object.entries(byCategory).map(([cat, items]) => (
+                <div key={cat}>
+                  <h3 className="font-ui uppercase text-xs text-[#9C9686] mb-2 tracking-widest font-medium">{cat}</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {items.map((item) => (
+                      <div key={item.id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                        <DishImage src={item.image} alt={item.name} className="w-full aspect-square" />
+                        <div className="p-2.5">
+                          <div className="text-sm font-medium text-[#16261F] leading-tight line-clamp-2">{item.name}</div>
+                          <div className="font-ui font-semibold text-[#8a6f42] mt-1">{money(item.price)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <a href={staffLoginUrl()} className="text-[#EAE4D3] text-xs font-ui underline mt-6">Staff login</a>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Login
 // ---------------------------------------------------------------------------
+function menuUrl() {
+  if (typeof window === "undefined") return "";
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("menu", "1");
+  return url.toString();
+}
+
+function CustomerMenuCard() {
+  const url = menuUrl();
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=8&color=22-38-31&bgcolor=250-248-242&data=${encodeURIComponent(url)}`;
+  return (
+    <div className="mt-8 bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-5 flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
+      <img src={qrSrc} alt="Scan to view menu" className="w-28 h-28 rounded-xl shrink-0" />
+      <div>
+        <div className="font-display text-lg font-600 text-[#16261F]">Browsing as a guest?</div>
+        <p className="text-xs font-ui text-[#5c5648] mt-1 mb-3">Scan the code or tap below to see today's menu — no login needed.</p>
+        <a href={url} className="inline-flex items-center gap-2 bg-[#16261F] text-white text-xs font-ui font-semibold uppercase tracking-wide px-4 py-2.5 rounded-full shadow">
+          <UtensilsCrossed size={14} /> View Menu
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function LoginScreen({ profiles, setProfiles }) {
   const [pendingLogin, setPendingLogin] = useState(null);
   const [pinInput, setPinInput] = useState("");
@@ -309,6 +408,8 @@ function LoginScreen({ profiles, setProfiles }) {
           <button onClick={() => setShowSetup(true)} className="mt-5 text-[#EAE4D3] text-xs font-ui underline mx-auto block">
             + add a staff profile
           </button>
+
+          <CustomerMenuCard />
         </div>
       )}
 
@@ -686,7 +787,8 @@ function ServerDashboard({ currentUser, menu, orders, setOrders }) {
 // ---------------------------------------------------------------------------
 // CHEF DASHBOARD
 // ---------------------------------------------------------------------------
-function ChefDashboard({ orders, setOrders }) {
+function ChefDashboard({ orders, setOrders, menu, setMenu }) {
+  const [tab, setTab] = useState("kitchen");
   const visible = orders.filter(o => !o.billed).sort((a, b) => {
     if (a.urgent !== b.urgent) return a.urgent ? -1 : 1;
     return new Date(a.createdAt) - new Date(b.createdAt);
@@ -705,29 +807,77 @@ function ChefDashboard({ orders, setOrders }) {
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-4">
-        <ChefHat className="text-[#C1694F]" size={20} />
-        <h2 className="font-display text-2xl font-600 text-[#16261F]">Kitchen — Orders by Table</h2>
-      </div>
-      {Object.keys(grouped).length === 0 && <p className="text-sm text-[#9C9686] font-ui">No orders in progress.</p>}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {Object.entries(grouped).map(([table, tableOrders]) => (
-          <div key={table} className="space-y-3">
-            {tableOrders.map((o) => (
-              <OrderTicket key={o.id} order={o} footer={
-                o.status !== "sent" ? (
-                  <button onClick={() => advance(o)}
-                    className="w-full bg-[#7C8F5E] text-white py-3 rounded-full text-xs font-ui font-semibold uppercase tracking-widest flex items-center justify-center gap-2 shadow-sm">
-                    <Check size={14} /> {STATUS_NEXT_LABEL[o.status]}
-                  </button>
-                ) : (
-                  <div className="w-full text-center text-[#7C8F5E] text-xs font-ui font-medium uppercase tracking-widest py-1">✓ Sent to table</div>
-                )
-              } />
+      <NavTabs tabs={[["kitchen", "Kitchen", ChefHat], ["menu", "Menu", UtensilsCrossed]]} current={tab} onChange={setTab} />
+      {tab === "kitchen" ? (
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <ChefHat className="text-[#C1694F]" size={20} />
+            <h2 className="font-display text-2xl font-600 text-[#16261F]">Kitchen — Orders by Table</h2>
+          </div>
+          {Object.keys(grouped).length === 0 && <p className="text-sm text-[#9C9686] font-ui">No orders in progress.</p>}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Object.entries(grouped).map(([table, tableOrders]) => (
+              <div key={table} className="space-y-3">
+                {tableOrders.map((o) => (
+                  <OrderTicket key={o.id} order={o} footer={
+                    o.status !== "sent" ? (
+                      <button onClick={() => advance(o)}
+                        className="w-full bg-[#7C8F5E] text-white py-3 rounded-full text-xs font-ui font-semibold uppercase tracking-widest flex items-center justify-center gap-2 shadow-sm">
+                        <Check size={14} /> {STATUS_NEXT_LABEL[o.status]}
+                      </button>
+                    ) : (
+                      <div className="w-full text-center text-[#7C8F5E] text-xs font-ui font-medium uppercase tracking-widest py-1">✓ Sent to table</div>
+                    )
+                  } />
+                ))}
+              </div>
             ))}
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <AvailabilityBoard menu={menu} setMenu={setMenu} />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Dish availability toggle — usable by owner, manager, and chef to mark a
+// dish available or 86'd (out of stock) without needing full edit access.
+// ---------------------------------------------------------------------------
+function AvailabilityBoard({ menu, setMenu }) {
+  const [category, setCategory] = useState("All");
+  const categories = [...new Set(menu.map((m) => m.category))];
+  const filtered = category === "All" ? menu : menu.filter((m) => m.category === category);
+  const toggle = (id) => setMenu(menu.map((m) => m.id === id ? { ...m, available: !m.available } : m));
+
+  return (
+    <div>
+      <div className="font-display text-2xl font-600 text-[#16261F] mb-4 flex items-center gap-2"><UtensilsCrossed size={20} /> Dish Availability</div>
+      {menu.length === 0 ? (
+        <p className="text-sm text-[#9C9686] font-ui">No dishes on the menu yet.</p>
+      ) : (
+        <>
+          <CategoryChips categories={categories} selected={category} onSelect={setCategory} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {filtered.map((item) => (
+              <button key={item.id} onClick={() => toggle(item.id)} className="text-left bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-lg transition">
+                <div className="relative">
+                  <DishImage src={item.image} alt={item.name} className={`w-full aspect-square ${item.available === false ? "opacity-40 grayscale" : ""}`} />
+                  <div className="absolute top-1.5 right-1.5">
+                    <Tag tone={item.available === false ? "urgent" : "ready"}>{item.available === false ? "86'd" : "Available"}</Tag>
+                  </div>
+                </div>
+                <div className="p-2.5">
+                  <div className="text-sm font-medium text-[#16261F] leading-tight truncate">{item.name}</div>
+                  <div className="font-ui font-semibold text-sm text-[#8a6f42] mt-1">{money(item.price)}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-[#9C9686] font-ui mt-3">Tap a dish to mark it available or 86'd — updates for servers and the customer menu instantly.</p>
+        </>
+      )}
     </div>
   );
 }
