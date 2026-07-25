@@ -3,7 +3,8 @@ import {
   ChefHat, UtensilsCrossed, Receipt, Users, LogOut, Plus, Minus, Trash2,
   Check, Clock, Flame, Zap, Printer, X, Pencil, Save, ArrowRight,
   Search, ClipboardList, ShieldCheck, CircleDot, ImagePlus, Loader2, Leaf,
-  ShoppingBag, Home, LayoutDashboard, TrendingUp, Utensils, MessageCircle
+  ShoppingBag, Home, LayoutDashboard, TrendingUp, Utensils, MessageCircle,
+  Bell, Volume2, PartyPopper, ChevronLeft, ChevronRight, History, Cake, Baby
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from "recharts";
 import html2canvas from "html2canvas";
@@ -41,7 +42,7 @@ const BRAND = {
 
 // All shared restaurant data lives in one Firestore collection, "restaurant",
 // as four documents: profiles / menu / orders / bills — each holding { data: [...] }.
-const KEYS = { profiles: "profiles", menu: "menu", orders: "orders", bills: "bills" };
+const KEYS = { profiles: "profiles", menu: "menu", orders: "orders", bills: "bills", parties: "parties" };
 const COLLECTION = "restaurant";
 
 function docRef(key) {
@@ -99,6 +100,45 @@ const STATUS_LABEL = { pending: "New", preparing: "Preparing", ready: "Complete"
 const STATUS_NEXT_LABEL = { pending: "Start Preparing", preparing: "Mark Complete", ready: "Mark Sent" };
 
 // ---------------------------------------------------------------------------
+// Sound alerts — generated tones (no audio file to host). Browsers block
+// audio until the page has had a user gesture (a click/tap), so we "unlock"
+// the shared AudioContext on login — after that, alerts can fire on their
+// own. Gain is set to the maximum the browser allows (1.0); a web app can't
+// change the device's physical/system volume, only how loud its own sound
+// plays within that.
+// ---------------------------------------------------------------------------
+let sharedAudioCtx = null;
+function unlockAudio() {
+  try {
+    if (!sharedAudioCtx) sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (sharedAudioCtx.state === "suspended") sharedAudioCtx.resume();
+  } catch (e) { /* audio unsupported in this browser — alerts will just stay silent */ }
+}
+function playAlertTone(pattern) {
+  try {
+    if (!sharedAudioCtx) sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (sharedAudioCtx.state === "suspended") sharedAudioCtx.resume();
+    let t = sharedAudioCtx.currentTime;
+    pattern.forEach((freq) => {
+      const osc = sharedAudioCtx.createOscillator();
+      const gain = sharedAudioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(1, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+      osc.connect(gain);
+      gain.connect(sharedAudioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.34);
+      t += 0.36;
+    });
+  } catch (e) { /* ignore — visual toast still shows */ }
+}
+const playNewOrderAlert = () => playAlertTone([880, 660, 880, 660, 880]);
+const playStatusAlert = () => playAlertTone([740, 990]);
+
+// ---------------------------------------------------------------------------
 // Root App
 // ---------------------------------------------------------------------------
 export default function App() {
@@ -106,8 +146,9 @@ export default function App() {
   const [menu, setMenu] = useState([]);
   const [orders, setOrders] = useState([]);
   const [bills, setBills] = useState([]);
+  const [parties, setParties] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loaded, setLoaded] = useState({ profiles: false, menu: false, orders: false, bills: false });
+  const [loaded, setLoaded] = useState({ profiles: false, menu: false, orders: false, bills: false, parties: false });
   const [currentUser, setCurrentUser] = useState(null);
   const [syncedAt, setSyncedAt] = useState(null);
   const [globalView, setGlobalView] = useState("home");
@@ -123,6 +164,7 @@ export default function App() {
       subscribe(KEYS.menu, (v) => { setMenu(v); markLoaded("menu"); setSyncedAt(new Date()); }),
       subscribe(KEYS.orders, (v) => { setOrders(v); markLoaded("orders"); setSyncedAt(new Date()); }),
       subscribe(KEYS.bills, (v) => { setBills(v); markLoaded("bills"); setSyncedAt(new Date()); }),
+      subscribe(KEYS.parties, (v) => { setParties(v); markLoaded("parties"); setSyncedAt(new Date()); }),
     ];
     return () => unsubs.forEach((u) => u());
   }, []);
@@ -140,13 +182,18 @@ export default function App() {
   const persist = { profiles: (n) => { setProfiles(n); persistToFirestore(KEYS.profiles, n); },
     menu: (n) => { setMenu(n); persistToFirestore(KEYS.menu, n); },
     orders: (n) => { setOrders(n); persistToFirestore(KEYS.orders, n); },
-    bills: (n) => { setBills(n); persistToFirestore(KEYS.bills, n); } };
+    bills: (n) => { setBills(n); persistToFirestore(KEYS.bills, n); },
+    parties: (n) => { setParties(n); persistToFirestore(KEYS.parties, n); } };
 
   // Every role can take orders like a server, not just server logins. Server
   // accounts always land straight on order-taking (that's their whole job);
   // everyone else gets a small toggle to switch into "Take Order" mode.
   const showOrderToggle = currentUser && currentUser.role !== "server";
   const effectiveView = currentUser && currentUser.role === "server" ? "order" : globalView;
+
+  // New-order alerts for chefs, status-change alerts for everyone else —
+  // sound + on-screen popup, live off the same Firestore orders feed.
+  const notification = useOrderNotifications(orders, currentUser);
 
   if (isPublicMenu) {
     return (
@@ -162,6 +209,7 @@ export default function App() {
     <div className="relative min-h-screen">
       <AmbientBackground />
       <FontStyles />
+      <NotificationToast notification={notification} />
       {loading ? (
         <div className="relative z-10 min-h-screen flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
@@ -197,6 +245,7 @@ export default function App() {
                   menu={menu} setMenu={persist.menu}
                   orders={orders} setOrders={persist.orders}
                   bills={bills} setBills={persist.bills}
+                  parties={parties} setParties={persist.parties}
                 />
               )}
               {currentUser.role === "chef" && (
@@ -206,6 +255,82 @@ export default function App() {
           )}
         </Shell>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Order notifications — new orders alert the chef, status changes (made by
+// the chef) alert everyone else. Sound + on-screen popup.
+// ---------------------------------------------------------------------------
+function useOrderNotifications(orders, currentUser) {
+  const prevRef = useRef(null);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    if (!currentUser) { prevRef.current = null; return; }
+    const prev = prevRef.current;
+
+    if (prev === null) {
+      // First snapshot after login — just record state, don't fire alerts
+      // for orders that already existed before this session started.
+      const map = {};
+      orders.forEach((o) => { map[o.id] = o.status; });
+      prevRef.current = map;
+      return;
+    }
+
+    const nextMap = {};
+    let newOrderForChef = null;
+    let statusChangeForOthers = null;
+
+    orders.forEach((o) => {
+      nextMap[o.id] = o.status;
+      if (!(o.id in prev)) {
+        if (currentUser.role === "chef" && o.status === "pending") newOrderForChef = o;
+      } else if (prev[o.id] !== o.status) {
+        if (currentUser.role === "server" || currentUser.role === "manager" || currentUser.role === "owner") {
+          statusChangeForOthers = o;
+        }
+      }
+    });
+    prevRef.current = nextMap;
+
+    if (newOrderForChef) {
+      playNewOrderAlert();
+      setToast({ tone: "new", title: `New order — Table ${newOrderForChef.table}`, subtitle: `${newOrderForChef.items.length} item${newOrderForChef.items.length !== 1 ? "s" : ""} from ${newOrderForChef.serverName}` });
+    } else if (statusChangeForOthers) {
+      playStatusAlert();
+      setToast({ tone: "status", title: `Table ${statusChangeForOthers.table} → ${STATUS_LABEL[statusChangeForOthers.status]}`, subtitle: "Updated by the kitchen" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, currentUser]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 7000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  return [toast, setToast];
+}
+
+function NotificationToast({ notification }) {
+  const [toast, setToast] = notification;
+  if (!toast) return null;
+  const isNew = toast.tone === "new";
+  return (
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 no-print w-[calc(100%-1.5rem)] max-w-sm">
+      <div className={`rounded-2xl shadow-2xl px-4 py-3.5 flex items-start gap-3 text-white ${isNew ? "bg-[#C1694F]" : "bg-[#16261F]"} animate-pulse-once`}>
+        <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0 mt-0.5">
+          <Bell size={16} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-ui font-semibold text-sm leading-tight">{toast.title}</div>
+          <div className="font-ui text-xs text-white/80 mt-0.5">{toast.subtitle}</div>
+        </div>
+        <button onClick={() => setToast(null)} className="shrink-0"><X size={16} /></button>
+      </div>
     </div>
   );
 }
@@ -238,6 +363,8 @@ function FontStyles() {
       .scrollbar-none::-webkit-scrollbar { display: none; }
       .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
       .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      @keyframes pulse-once { 0% { transform: scale(0.95); opacity: 0; } 15% { transform: scale(1.02); opacity: 1; } 30% { transform: scale(1); } 100% { transform: scale(1); } }
+      .animate-pulse-once { animation: pulse-once 0.35s ease-out; }
       @media print {
         .no-print { display: none !important; }
         .print-area { position: absolute; top: 0; left: 0; width: 100%; }
@@ -346,6 +473,7 @@ function LoginScreen({ profiles, setProfiles }) {
   const [form, setForm] = useState({ name: "", role: "server", pin: "" });
 
   const attemptLogin = (profile, pin) => {
+    unlockAudio();
     if (String(profile.pin) === String(pin)) {
       window.dispatchEvent(new CustomEvent("rt-login", { detail: profile }));
     } else {
@@ -355,6 +483,7 @@ function LoginScreen({ profiles, setProfiles }) {
 
   const createProfile = (e) => {
     e.preventDefault();
+    unlockAudio();
     if (!form.name.trim() || !form.pin.trim()) return;
     const p = { id: uid(), name: form.name.trim(), role: form.role, pin: form.pin.trim() };
     const next = [...profiles, p];
@@ -462,6 +591,8 @@ function LoginScreen({ profiles, setProfiles }) {
 // App Shell (top bar + floating content card)
 // ---------------------------------------------------------------------------
 function Shell({ currentUser, onLogout, syncedAt, children }) {
+  const [soundOn, setSoundOn] = useState(false);
+  const enableSound = () => { unlockAudio(); setSoundOn(true); playStatusAlert(); };
   return (
     <div className="relative z-10 min-h-screen flex flex-col">
       <header className="bg-[#16261F] text-white no-print sticky top-0 z-30 shadow-lg">
@@ -474,6 +605,9 @@ function Shell({ currentUser, onLogout, syncedAt, children }) {
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            <button onClick={enableSound} title="Enable notification sound" className={`p-2 rounded-full transition ${soundOn ? "text-[#7C8F5E]" : "text-white/70 hover:bg-white/10"}`}>
+              <Volume2 size={17} />
+            </button>
             <div className="hidden md:flex items-center gap-1 text-[10px] font-ticket text-[#B8B2A0] uppercase tracking-widest">
               <CircleDot size={9} className="text-[#7C8F5E]" /> synced {syncedAt ? syncedAt.toLocaleTimeString() : "…"}
             </div>
@@ -885,8 +1019,8 @@ function AvailabilityBoard({ menu, setMenu }) {
 // ---------------------------------------------------------------------------
 // ADMIN DASHBOARD (owner / manager)
 // ---------------------------------------------------------------------------
-function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, orders, setOrders, bills, setBills }) {
-  const tabsBase = [["dashboard", "Dashboard", LayoutDashboard], ["menu", "Menu", UtensilsCrossed], ["orders", "Orders", Clock], ["billing", "Billing", Receipt]];
+function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, orders, setOrders, bills, setBills, parties, setParties }) {
+  const tabsBase = [["dashboard", "Dashboard", LayoutDashboard], ["menu", "Menu", UtensilsCrossed], ["orders", "Orders", Clock], ["billing", "Billing", Receipt], ["history", "Bill History", History], ["parties", "Parties", PartyPopper]];
   const tabs = currentUser.role === "owner" ? [...tabsBase, ["staff", "Staff", Users]] : tabsBase;
   const [tab, setTab] = useState("dashboard");
 
@@ -907,6 +1041,8 @@ function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, ord
         {tab === "menu" && <MenuManager menu={menu} setMenu={setMenu} />}
         {tab === "orders" && <OrdersOverview orders={orders} />}
         {tab === "billing" && <Billing orders={orders} setOrders={setOrders} bills={bills} setBills={setBills} />}
+        {tab === "history" && <BillHistory bills={bills} parties={parties} />}
+        {tab === "parties" && <PartyBookings parties={parties} setParties={setParties} currentUser={currentUser} />}
         {tab === "staff" && currentUser.role === "owner" && <StaffManager profiles={profiles} setProfiles={setProfiles} currentUser={currentUser} />}
       </div>
     </div>
@@ -1435,6 +1571,430 @@ function BillReceipt({ bill, onClose }) {
       </div>
       {sendMsg && <p className="text-xs font-ui text-[#5c5648] mt-2 text-center no-print">{sendMsg}</p>}
       <button onClick={onClose} className="w-full mt-2 bg-[#F0EBDD] text-[#16261F] py-3 rounded-full text-sm font-ui font-semibold uppercase no-print">Close Table</button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BILL HISTORY — table bills + birthday party bills, filterable by Today / This Month
+// ---------------------------------------------------------------------------
+function BillHistory({ bills, parties }) {
+  const [range, setRange] = useState("today");
+  const todayKey = todayDateStr();
+  const monthPrefix = todayKey.slice(0, 7);
+
+  const partyBills = parties.filter((p) => p.billed);
+
+  const allBills = [
+    ...bills.map((b) => ({ ...b, kind: "Table", label: `Table ${b.table}` })),
+    ...partyBills.map((p) => ({ ...p, kind: "Birthday", label: `${p.customerName}'s party`, total: p.total, createdAt: p.billedAt || p.createdAt })),
+  ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const filtered = allBills.filter((b) => {
+    const key = b.createdAt.slice(0, 10);
+    return range === "today" ? key === todayKey : key.slice(0, 7) === monthPrefix;
+  });
+
+  const total = filtered.reduce((s, b) => s + b.total, 0);
+  const tableCount = filtered.filter((b) => b.kind === "Table").length;
+  const partyCount = filtered.filter((b) => b.kind === "Birthday").length;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <div className="font-display text-2xl font-600 text-[#16261F] flex items-center gap-2"><History size={20} /> Bill History</div>
+        <div className="flex gap-1 bg-[#F0EBDD] rounded-full p-1">
+          <button onClick={() => setRange("today")} className={`px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide ${range === "today" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>Today</button>
+          <button onClick={() => setRange("month")} className={`px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide ${range === "month" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>This Month</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="bg-white rounded-2xl shadow-sm p-4">
+          <div className="font-display text-2xl font-600 text-[#16261F]">{money(total)}</div>
+          <div className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] mt-1 font-medium">Total Billed</div>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm p-4">
+          <div className="font-display text-2xl font-600 text-[#16261F]">{tableCount}</div>
+          <div className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] mt-1 font-medium">Table Bills</div>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm p-4">
+          <div className="font-display text-2xl font-600 text-[#16261F]">{partyCount}</div>
+          <div className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] mt-1 font-medium">Birthday Parties</div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+        <div className="grid grid-cols-[60px_1fr_90px_90px] gap-2 px-4 py-2.5 bg-[#F0EBDD] text-[9px] font-ui uppercase tracking-widest text-[#5c5648] font-medium">
+          <span>Time</span><span>Bill</span><span>Type</span><span className="text-right">Amount</span>
+        </div>
+        <div className="divide-y divide-[#F0EBDD] max-h-[55vh] overflow-y-auto">
+          {filtered.length === 0 && <div className="px-4 py-6 text-sm text-[#9C9686] font-ui text-center">No bills {range === "today" ? "today" : "this month"} yet.</div>}
+          {filtered.map((b) => (
+            <div key={b.id} className="grid grid-cols-[60px_1fr_90px_90px] gap-2 px-4 py-2.5 items-center text-sm">
+              <span className="font-ticket text-xs text-[#9C9686]">{new Date(b.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+              <span className="text-[#16261F] truncate">{b.label} <span className="text-[#9C9686]">— {b.customerName}</span></span>
+              <span><Tag tone={b.kind === "Birthday" ? "quick" : "default"}>{b.kind}</Tag></span>
+              <span className="font-ticket text-sm text-right text-[#16261F]">{money(b.total)}</span>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-[60px_1fr_90px_90px] gap-2 px-4 py-3 bg-[#FAF8F2] border-t border-[#F0EBDD]">
+          <span></span><span className="font-ui font-semibold text-sm text-[#16261F]">Total</span><span></span>
+          <span className="font-display font-600 text-lg text-right text-[#8a6f42]">{money(total)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BIRTHDAY PARTY BOOKINGS — calendar (week/month), booking form, bill
+// ---------------------------------------------------------------------------
+const PARTY_SLOTS = [
+  { id: "11-2", label: "11:00 AM – 2:00 PM" },
+  { id: "3-6", label: "3:00 PM – 6:00 PM" },
+  { id: "5-8", label: "5:00 PM – 8:00 PM" },
+];
+const PACKAGES = { standard: "Standard", premium: "Premium" };
+
+function todayDateStr() { return new Date().toISOString().slice(0, 10); }
+function toDateStr(d) { return d.toISOString().slice(0, 10); }
+function startOfWeek(d) { const x = new Date(d); const day = x.getDay(); x.setDate(x.getDate() - day); x.setHours(0, 0, 0, 0); return x; }
+function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+
+function PartyBookings({ parties, setParties, currentUser }) {
+  const [view, setView] = useState("week");
+  const [anchor, setAnchor] = useState(new Date());
+  const [formOpen, setFormOpen] = useState(false);
+  const [prefill, setPrefill] = useState(null);
+  const [billFor, setBillFor] = useState(null);
+
+  const openBookingForm = (dateStr, slotId) => { setPrefill({ date: dateStr, slot: slotId }); setFormOpen(true); };
+
+  const addBooking = (booking) => {
+    setParties([...parties, { id: uid(), ...booking, billed: false, createdBy: currentUser.name, createdAt: new Date().toISOString() }]);
+    setFormOpen(false);
+  };
+  const removeBooking = (id) => setParties(parties.filter((p) => p.id !== id));
+  const markBilled = (booking, total) => {
+    setParties(parties.map((p) => p.id === booking.id ? { ...p, billed: true, total, billedAt: new Date().toISOString() } : p));
+  };
+
+  const bookingFor = (dateStr, slotId) => parties.find((p) => p.date === dateStr && p.slot === slotId);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <div className="font-display text-2xl font-600 text-[#16261F] flex items-center gap-2"><PartyPopper size={20} /> Birthday Parties</div>
+        <button onClick={() => { setPrefill(null); setFormOpen(true); }}
+          className="bg-[#16261F] text-white px-4 py-2 rounded-full text-xs font-ui font-semibold uppercase tracking-wide flex items-center gap-2 shadow-lg">
+          <Plus size={14} /> New Booking
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <div className="flex items-center gap-1">
+          <button onClick={() => setAnchor(view === "week" ? addDays(anchor, -7) : new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1))} className="p-2 bg-white rounded-full shadow-sm"><ChevronLeft size={16} /></button>
+          <button onClick={() => setAnchor(new Date())} className="px-3 py-2 bg-white rounded-full shadow-sm text-xs font-ui font-medium uppercase">Today</button>
+          <button onClick={() => setAnchor(view === "week" ? addDays(anchor, 7) : new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1))} className="p-2 bg-white rounded-full shadow-sm"><ChevronRight size={16} /></button>
+        </div>
+        <div className="flex gap-1 bg-[#F0EBDD] rounded-full p-1">
+          <button onClick={() => setView("week")} className={`px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide ${view === "week" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>Week</button>
+          <button onClick={() => setView("month")} className={`px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide ${view === "month" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>Month</button>
+        </div>
+      </div>
+
+      {view === "week" ? (
+        <WeekView anchor={anchor} bookingFor={bookingFor} onBookSlot={openBookingForm} onSelectBooking={setBillFor} onRemove={removeBooking} />
+      ) : (
+        <MonthView anchor={anchor} parties={parties} onSelectDay={(d) => { setAnchor(d); setView("week"); }} />
+      )}
+
+      {formOpen && (
+        <PartyBookingForm prefill={prefill} onClose={() => setFormOpen(false)} onSave={addBooking} bookingFor={bookingFor} />
+      )}
+      {billFor && (
+        <PartyBillModal booking={billFor} onClose={() => setBillFor(null)} onBilled={(total) => { markBilled(billFor, total); setBillFor(null); }} onDelete={() => { removeBooking(billFor.id); setBillFor(null); }} />
+      )}
+    </div>
+  );
+}
+
+function WeekView({ anchor, bookingFor, onBookSlot, onSelectBooking, onRemove }) {
+  const weekStart = startOfWeek(anchor);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+  return (
+    <div className="bg-white rounded-2xl shadow-md overflow-x-auto">
+      <div className="grid min-w-[720px]" style={{ gridTemplateColumns: "90px repeat(7, 1fr)" }}>
+        <div className="p-2"></div>
+        {days.map((d) => {
+          const isToday = toDateStr(d) === todayDateStr();
+          return (
+            <div key={d.toISOString()} className={`p-2 text-center border-b border-[#F0EBDD] ${isToday ? "bg-[#F0EBDD]/60" : ""}`}>
+              <div className="font-ui text-[10px] uppercase tracking-widest text-[#9C9686]">{d.toLocaleDateString("en-IN", { weekday: "short" })}</div>
+              <div className="font-display text-lg font-600 text-[#16261F]">{d.getDate()}</div>
+            </div>
+          );
+        })}
+        {PARTY_SLOTS.map((slot) => (
+          <React.Fragment key={slot.id}>
+            <div className="p-2 flex items-center border-t border-[#F0EBDD]">
+              <span className="font-ui text-[10px] text-[#9C9686] leading-tight">{slot.label}</span>
+            </div>
+            {days.map((d) => {
+              const dateStr = toDateStr(d);
+              const booking = bookingFor(dateStr, slot.id);
+              return (
+                <div key={dateStr + slot.id} className="p-1.5 border-t border-l border-[#F0EBDD] min-h-[64px]">
+                  {booking ? (
+                    <button onClick={() => onSelectBooking(booking)}
+                      className={`w-full h-full rounded-xl px-2 py-1.5 text-left ${booking.package === "premium" ? "bg-[#C9A66B]/15 border border-[#C9A66B]/40" : "bg-[#7C8F5E]/15 border border-[#7C8F5E]/40"}`}>
+                      <div className="text-[11px] font-ui font-semibold text-[#16261F] truncate">{booking.customerName}</div>
+                      <div className="text-[9px] font-ui text-[#5c5648] flex items-center gap-1"><Baby size={9} /> {booking.kids}k · {booking.adults}a</div>
+                      <div className="text-[8px] font-ui uppercase tracking-wide" style={{ color: booking.package === "premium" ? "#8a6f42" : "#557052" }}>{PACKAGES[booking.package]}</div>
+                    </button>
+                  ) : (
+                    <button onClick={() => onBookSlot(dateStr, slot.id)} className="w-full h-full rounded-xl border border-dashed border-[#DCD5C0] text-[#C9A66B] text-[10px] font-ui uppercase tracking-wide flex items-center justify-center gap-1 hover:bg-[#F0EBDD]/50">
+                      <Plus size={12} /> Book
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MonthView({ anchor, parties, onSelectDay }) {
+  const monthStart = startOfMonth(anchor);
+  const gridStart = startOfWeek(monthStart);
+  const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  const bookingsByDate = {};
+  parties.forEach((p) => { (bookingsByDate[p.date] = bookingsByDate[p.date] || []).push(p); });
+
+  return (
+    <div className="bg-white rounded-2xl shadow-md p-3">
+      <div className="grid grid-cols-7 gap-1 mb-1">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+          <div key={d} className="text-center text-[9px] font-ui uppercase tracking-widest text-[#9C9686] py-1">{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {days.map((d) => {
+          const dateStr = toDateStr(d);
+          const inMonth = d.getMonth() === monthStart.getMonth();
+          const isToday = dateStr === todayDateStr();
+          const dayBookings = bookingsByDate[dateStr] || [];
+          return (
+            <button key={dateStr} onClick={() => onSelectDay(d)}
+              className={`rounded-xl p-1.5 text-left min-h-[64px] border ${isToday ? "border-[#C9A66B]" : "border-[#F0EBDD]"} ${inMonth ? "bg-white" : "bg-[#FAF8F2] opacity-50"}`}>
+              <div className="font-ticket text-xs text-[#16261F]">{d.getDate()}</div>
+              <div className="flex gap-0.5 mt-1 flex-wrap">
+                {PARTY_SLOTS.map((slot) => {
+                  const booked = dayBookings.some((b) => b.slot === slot.id);
+                  return <span key={slot.id} className={`w-2 h-2 rounded-full ${booked ? "bg-[#C1694F]" : "bg-[#EAE4D3]"}`} />;
+                })}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-[#9C9686] font-ui mt-3">Dots show the 3 party slots for that day — filled means booked. Tap a day to open its week view.</p>
+    </div>
+  );
+}
+
+function PartyBookingForm({ prefill, onClose, onSave, bookingFor }) {
+  const [form, setForm] = useState({
+    date: prefill?.date || todayDateStr(), slot: prefill?.slot || PARTY_SLOTS[0].id,
+    customerName: "", customerPhone: "", kids: "", adults: "",
+    package: "standard", packagePrice: "", addOns: [], addOnForm: { name: "", price: "" },
+  });
+  const [error, setError] = useState("");
+
+  const addAddOn = () => {
+    if (!form.addOnForm.name.trim() || !form.addOnForm.price) return;
+    setForm({ ...form, addOns: [...form.addOns, { id: uid(), name: form.addOnForm.name.trim(), price: parseFloat(form.addOnForm.price) }], addOnForm: { name: "", price: "" } });
+  };
+  const removeAddOn = (id) => setForm({ ...form, addOns: form.addOns.filter((a) => a.id !== id) });
+
+  const conflict = bookingFor(form.date, form.slot);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.customerName.trim() || !form.kids || !form.adults || !form.packagePrice) { setError("Customer name, kids/adults count, and package price are required."); return; }
+    if (conflict) { setError("That date and slot is already booked — pick a different slot."); return; }
+    setError("");
+    const total = parseFloat(form.packagePrice) + form.addOns.reduce((s, a) => s + a.price, 0);
+    onSave({
+      date: form.date, slot: form.slot, customerName: form.customerName.trim(), customerPhone: form.customerPhone.trim(),
+      kids: parseInt(form.kids), adults: parseInt(form.adults), package: form.package, packagePrice: parseFloat(form.packagePrice),
+      addOns: form.addOns, total,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center px-4 py-8" onClick={onClose}>
+      <div className="bg-white rounded-3xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <p className="font-display text-xl font-600 text-[#16261F] flex items-center gap-2"><Cake size={18} /> New Birthday Booking</p>
+          <button onClick={onClose} className="p-1 hover:bg-[#F0EBDD] rounded-full"><X size={18} /></button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">Date</label>
+              <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket" />
+            </div>
+            <div>
+              <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">Slot</label>
+              <select value={form.slot} onChange={(e) => setForm({ ...form, slot: e.target.value })} className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1">
+                {PARTY_SLOTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            </div>
+          </div>
+          {conflict && <p className="text-[#C1694F] text-xs font-ui">This slot is already booked for {conflict.customerName} — choose another.</p>}
+
+          <input placeholder="Customer name" value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm" />
+          <input placeholder="Customer phone (optional, for WhatsApp)" value={form.customerPhone} onChange={(e) => setForm({ ...form, customerPhone: e.target.value })} inputMode="tel" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm" />
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">No. of Kids</label>
+              <input value={form.kids} onChange={(e) => setForm({ ...form, kids: e.target.value })} inputMode="numeric" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket" />
+            </div>
+            <div>
+              <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">No. of Adults</label>
+              <input value={form.adults} onChange={(e) => setForm({ ...form, adults: e.target.value })} inputMode="numeric" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">Package</label>
+              <select value={form.package} onChange={(e) => setForm({ ...form, package: e.target.value })} className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1">
+                <option value="standard">Standard</option>
+                <option value="premium">Premium</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">Package Price</label>
+              <input value={form.packagePrice} onChange={(e) => setForm({ ...form, packagePrice: e.target.value })} inputMode="decimal" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket" placeholder="₹" />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium block mb-1">Additional Items &amp; Decorations</label>
+            {form.addOns.map((a) => (
+              <div key={a.id} className="flex justify-between items-center font-ticket text-sm mb-1">
+                <span>{a.name}</span>
+                <span className="flex items-center gap-2">{money(a.price)}<button type="button" onClick={() => removeAddOn(a.id)}><X size={13} className="text-[#C1694F]" /></button></span>
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <input placeholder="e.g. Balloon decor, Cake, DJ" value={form.addOnForm.name} onChange={(e) => setForm({ ...form, addOnForm: { ...form.addOnForm, name: e.target.value } })} className="flex-1 border border-[#EAE4D3] rounded-full px-3 py-2 text-sm" />
+              <input placeholder="Price" value={form.addOnForm.price} onChange={(e) => setForm({ ...form, addOnForm: { ...form.addOnForm, price: e.target.value } })} className="w-24 border border-[#EAE4D3] rounded-full px-3 py-2 text-sm font-ticket" />
+              <button type="button" onClick={addAddOn} className="px-4 bg-[#F0EBDD] rounded-full"><Plus size={16} /></button>
+            </div>
+          </div>
+
+          {error && <p className="text-[#C1694F] text-xs font-ui">{error}</p>}
+          <div className="flex justify-between font-display font-600 text-lg text-[#16261F] border-t border-[#F0EBDD] pt-3">
+            <span>Total</span>
+            <span className="text-[#8a6f42]">{money((parseFloat(form.packagePrice) || 0) + form.addOns.reduce((s, a) => s + a.price, 0))}</span>
+          </div>
+          <button type="submit" className="w-full bg-[#16261F] text-white py-3 rounded-full text-sm font-ui font-semibold uppercase tracking-wide shadow-lg flex items-center justify-center gap-2">
+            <PartyPopper size={16} /> Confirm Booking
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function PartyBillModal({ booking, onClose, onBilled, onDelete }) {
+  const receiptRef = useRef(null);
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState("");
+  const slotLabel = PARTY_SLOTS.find((s) => s.id === booking.slot)?.label || booking.slot;
+
+  const captureImage = async () => {
+    const canvas = await html2canvas(receiptRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+    return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/png"));
+  };
+
+  const sendOnWhatsApp = async () => {
+    setSending(true);
+    setSendMsg("");
+    try {
+      const blob = await captureImage();
+      if (!blob) throw new Error("render failed");
+      const filename = `serengeti-party-${booking.date}.png`;
+      const messageText = `Hi ${booking.customerName}, here's the bill for your birthday party at Serengeti on ${booking.date} (${slotLabel}). Total: ${money(booking.total)}. Thank you!`;
+      const file = new File([blob], filename, { type: "image/png" });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: "Serengeti Party Bill", text: messageText }); setSendMsg("Shared — pick WhatsApp from the share menu if it didn't open automatically."); }
+        catch (err) { if (err.name !== "AbortError") throw err; }
+        setSending(false);
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      const phoneDigits = booking.customerPhone ? booking.customerPhone.replace(/\D/g, "") : "";
+      const waUrl = phoneDigits ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(messageText)}` : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
+      window.open(waUrl, "_blank");
+      setSendMsg("Bill photo downloaded — WhatsApp is opening, attach the photo to your message.");
+    } catch (e) {
+      console.error(e);
+      setSendMsg("Couldn't prepare the bill image — try Print instead.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center px-4 py-8" onClick={onClose}>
+      <div className="max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+        <div ref={receiptRef} className="bg-white rounded-2xl shadow-lg p-6 font-ticket">
+          <div className="text-center mb-4">
+            <img src={BRAND.logo} alt="Serengeti" className="h-10 mx-auto mb-2" />
+            <div className="font-display text-xl font-600 tracking-wide text-[#16261F]">Serengeti · The Eden Park</div>
+            <div className="text-[10px] text-[#9C9686] uppercase tracking-widest">Birthday Party Bill</div>
+          </div>
+          <div className="perf mb-3" />
+          <div className="flex justify-between text-xs mb-1"><span>Customer</span><span>{booking.customerName}</span></div>
+          <div className="flex justify-between text-xs mb-1"><span>Date</span><span>{booking.date}</span></div>
+          <div className="flex justify-between text-xs mb-1"><span>Slot</span><span>{slotLabel}</span></div>
+          <div className="flex justify-between text-xs mb-3"><span>Guests</span><span>{booking.kids} kids · {booking.adults} adults</span></div>
+          <div className="perf mb-3" />
+          <div className="space-y-1 text-sm mb-3">
+            <div className="flex justify-between"><span>{PACKAGES[booking.package]} Package</span><span>{money(booking.packagePrice)}</span></div>
+            {booking.addOns.map((a) => <div key={a.id} className="flex justify-between"><span>{a.name}</span><span>{money(a.price)}</span></div>)}
+          </div>
+          <div className="perf mb-3" />
+          <div className="flex justify-between font-display font-600 text-lg text-[#16261F]"><span>Total</span><span className="text-[#8a6f42]">{money(booking.total)}</span></div>
+          <div className="text-center text-[10px] text-[#9C9686] mt-4 uppercase tracking-widest">Thank you for celebrating with us</div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button onClick={sendOnWhatsApp} disabled={sending} className="flex-1 bg-[#25D366] disabled:opacity-50 text-white py-3 rounded-full text-sm font-ui font-semibold uppercase flex items-center justify-center gap-2 shadow-lg">
+            {sending ? <Loader2 size={16} className="animate-spin" /> : <MessageCircle size={16} />} {sending ? "Preparing…" : "Send on WhatsApp"}
+          </button>
+          <button onClick={() => window.print()} className="flex-1 bg-[#16261F] text-white py-3 rounded-full text-sm font-ui font-semibold uppercase flex items-center justify-center gap-2 shadow-lg"><Printer size={16} /> Print</button>
+        </div>
+        {sendMsg && <p className="text-xs font-ui text-white/90 mt-2 text-center">{sendMsg}</p>}
+        <div className="flex gap-2 mt-2">
+          {!booking.billed && <button onClick={() => onBilled(booking.total)} className="flex-1 bg-[#7C8F5E] text-white py-2.5 rounded-full text-xs font-ui font-semibold uppercase">Mark as Billed</button>}
+          <button onClick={onDelete} className="flex-1 bg-[#F0EBDD] text-[#C1694F] py-2.5 rounded-full text-xs font-ui font-semibold uppercase">Cancel Booking</button>
+          <button onClick={onClose} className="flex-1 bg-[#F0EBDD] text-[#16261F] py-2.5 rounded-full text-xs font-ui font-semibold uppercase">Close</button>
+        </div>
+      </div>
     </div>
   );
 }
