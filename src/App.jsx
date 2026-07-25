@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   ChefHat, UtensilsCrossed, Receipt, Users, LogOut, Plus, Minus, Trash2,
   Check, Clock, Flame, Zap, Printer, X, Pencil, Save, ArrowRight,
   Search, ClipboardList, ShieldCheck, CircleDot, ImagePlus, Loader2, Leaf,
-  ShoppingBag, Home, LayoutDashboard, TrendingUp, Utensils
+  ShoppingBag, Home, LayoutDashboard, TrendingUp, Utensils, MessageCircle
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from "recharts";
+import html2canvas from "html2canvas";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
 
@@ -109,6 +110,7 @@ export default function App() {
   const [loaded, setLoaded] = useState({ profiles: false, menu: false, orders: false, bills: false });
   const [currentUser, setCurrentUser] = useState(null);
   const [syncedAt, setSyncedAt] = useState(null);
+  const [globalView, setGlobalView] = useState("home");
 
   useEffect(() => {
     const markLoaded = (k) => setLoaded((prev) => ({ ...prev, [k]: true }));
@@ -126,7 +128,7 @@ export default function App() {
   }, [loaded]);
 
   useEffect(() => {
-    const handler = (e) => setCurrentUser(e.detail);
+    const handler = (e) => { setCurrentUser(e.detail); setGlobalView("home"); };
     window.addEventListener("rt-login", handler);
     return () => window.removeEventListener("rt-login", handler);
   }, []);
@@ -135,6 +137,12 @@ export default function App() {
     menu: (n) => { setMenu(n); persistToFirestore(KEYS.menu, n); },
     orders: (n) => { setOrders(n); persistToFirestore(KEYS.orders, n); },
     bills: (n) => { setBills(n); persistToFirestore(KEYS.bills, n); } };
+
+  // Every role can take orders like a server, not just server logins. Server
+  // accounts always land straight on order-taking (that's their whole job);
+  // everyone else gets a small toggle to switch into "Take Order" mode.
+  const showOrderToggle = currentUser && currentUser.role !== "server";
+  const effectiveView = currentUser && currentUser.role === "server" ? "order" : globalView;
 
   return (
     <div className="relative min-h-screen">
@@ -151,20 +159,36 @@ export default function App() {
         <LoginScreen profiles={profiles} setProfiles={persist.profiles} />
       ) : (
         <Shell currentUser={currentUser} onLogout={() => setCurrentUser(null)} syncedAt={syncedAt}>
-          {(currentUser.role === "owner" || currentUser.role === "manager") && (
-            <AdminDashboard
-              currentUser={currentUser}
-              profiles={profiles} setProfiles={persist.profiles}
-              menu={menu} setMenu={persist.menu}
-              orders={orders} setOrders={persist.orders}
-              bills={bills} setBills={persist.bills}
-            />
+          {showOrderToggle && (
+            <div className="flex gap-1 mb-5 bg-[#F0EBDD] rounded-full p-1 w-fit no-print">
+              <button onClick={() => setGlobalView("home")}
+                className={`px-4 py-2 rounded-full text-sm font-ui font-medium flex items-center gap-2 transition ${effectiveView === "home" ? "bg-[#16261F] text-white shadow-md" : "text-[#5c5648] hover:text-[#16261F]"}`}>
+                <Home size={15} /> {ROLE_LABEL[currentUser.role]} Dashboard
+              </button>
+              <button onClick={() => setGlobalView("order")}
+                className={`px-4 py-2 rounded-full text-sm font-ui font-medium flex items-center gap-2 transition ${effectiveView === "order" ? "bg-[#16261F] text-white shadow-md" : "text-[#5c5648] hover:text-[#16261F]"}`}>
+                <ShoppingBag size={15} /> Take Order
+              </button>
+            </div>
           )}
-          {currentUser.role === "server" && (
+
+          {effectiveView === "order" ? (
             <ServerDashboard currentUser={currentUser} menu={menu} orders={orders} setOrders={persist.orders} />
-          )}
-          {currentUser.role === "chef" && (
-            <ChefDashboard orders={orders} setOrders={persist.orders} />
+          ) : (
+            <>
+              {(currentUser.role === "owner" || currentUser.role === "manager") && (
+                <AdminDashboard
+                  currentUser={currentUser}
+                  profiles={profiles} setProfiles={persist.profiles}
+                  menu={menu} setMenu={persist.menu}
+                  orders={orders} setOrders={persist.orders}
+                  bills={bills} setBills={persist.bills}
+                />
+              )}
+              {currentUser.role === "chef" && (
+                <ChefDashboard orders={orders} setOrders={persist.orders} />
+              )}
+            </>
           )}
         </Shell>
       )}
@@ -1062,6 +1086,7 @@ function Billing({ orders, setOrders, bills, setBills }) {
   const billableTables = [...new Set(orders.filter(o => !o.billed && (o.status === "sent" || o.status === "ready")).map(o => o.table))];
   const [selectedTable, setSelectedTable] = useState("");
   const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [extras, setExtras] = useState([]);
   const [extraForm, setExtraForm] = useState({ name: "", price: "" });
   const [finalizedBill, setFinalizedBill] = useState(null);
@@ -1083,7 +1108,7 @@ function Billing({ orders, setOrders, bills, setBills }) {
     if (!selectedTable || tableOrders.length === 0) return;
     const allItems = tableOrders.flatMap(o => o.items.map(it => ({ name: it.name, price: it.price, qty: it.qty, remarks: it.remarks })));
     const bill = {
-      id: uid(), table: selectedTable, customerName: customerName.trim() || "Guest",
+      id: uid(), table: selectedTable, customerName: customerName.trim() || "Guest", customerPhone: customerPhone.trim(),
       items: allItems, extras, total: grandTotal, createdAt: new Date().toISOString(),
     };
     setBills([bill, ...bills]);
@@ -1092,7 +1117,7 @@ function Billing({ orders, setOrders, bills, setBills }) {
   };
 
   const resetAfterBill = () => {
-    setFinalizedBill(null); setSelectedTable(""); setCustomerName(""); setExtras([]);
+    setFinalizedBill(null); setSelectedTable(""); setCustomerName(""); setCustomerPhone(""); setExtras([]);
   };
 
   if (finalizedBill) {
@@ -1141,7 +1166,8 @@ function Billing({ orders, setOrders, bills, setBills }) {
         <div>
           <div className="bg-white rounded-2xl shadow-md p-4 sm:sticky sm:top-4">
             <div className="font-display text-lg font-600 text-[#16261F] mb-3">Final Bill</div>
-            <input placeholder="Customer name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mb-3" />
+            <input placeholder="Customer name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mb-2" />
+            <input placeholder="Customer phone (optional, for WhatsApp)" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} inputMode="tel" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mb-3" />
             <div className="font-ticket text-sm space-y-1 mb-3">
               <div className="flex justify-between"><span>Subtotal</span><span>{money(dishSubtotal)}</span></div>
               <div className="flex justify-between"><span>Additional items</span><span>{money(extrasTotal)}</span></div>
@@ -1158,9 +1184,77 @@ function Billing({ orders, setOrders, bills, setBills }) {
 }
 
 function BillReceipt({ bill, onClose }) {
+  const receiptRef = useRef(null);
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState("");
+
+  const captureReceiptImage = async () => {
+    const canvas = await html2canvas(receiptRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+    return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/png"));
+  };
+
+  const sendOnWhatsApp = async () => {
+    setSending(true);
+    setSendMsg("");
+    try {
+      const blob = await captureReceiptImage();
+      if (!blob) throw new Error("Could not render the bill image.");
+      const filename = `serengeti-bill-table-${bill.table}.png`;
+      const messageText = `Hi ${bill.customerName}, here's your bill from Serengeti · The Eden Park — Table ${bill.table}. Total: ${money(bill.total)}. Thank you for dining with us!`;
+
+      // Preferred path: native share sheet with the bill image attached —
+      // works the same way on Android (Chrome) and iOS (Safari) and lets the
+      // person pick WhatsApp directly, with the photo already attached.
+      const file = new File([blob], filename, { type: "image/png" });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: "Serengeti Bill", text: messageText });
+          setSendMsg("Shared — pick WhatsApp from the share menu if it didn't open automatically.");
+        } catch (shareErr) {
+          if (shareErr.name !== "AbortError") throw shareErr;
+        }
+        setSending(false);
+        return;
+      }
+
+      // Fallback (mainly desktop browsers, or older mobile browsers without
+      // file-sharing support): download the image, then open WhatsApp with
+      // the message pre-filled so the photo just needs attaching manually.
+      const ua = navigator.userAgent || navigator.vendor || "";
+      const isIOS = /iPad|iPhone|iPod/.test(ua);
+      const isAndroid = /Android/.test(ua);
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+      const phoneDigits = bill.customerPhone ? bill.customerPhone.replace(/\D/g, "") : "";
+      const waUrl = phoneDigits
+        ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(messageText)}`
+        : `https://wa.me/?text=${encodeURIComponent(messageText)}`;
+      window.open(waUrl, "_blank");
+
+      setSendMsg(
+        isAndroid ? "Bill photo saved to Downloads — WhatsApp is opening, attach the photo from there."
+        : isIOS ? "Bill photo saved to Photos — WhatsApp is opening, attach the photo from there."
+        : "Bill photo downloaded and WhatsApp Web is opening — attach the photo to your message."
+      );
+    } catch (e) {
+      console.error(e);
+      setSendMsg("Couldn't prepare the bill image — try Print instead, or check your connection.");
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <div className="max-w-md mx-auto">
-      <div className="print-area bg-white rounded-2xl shadow-lg p-6 font-ticket">
+      <div ref={receiptRef} className="print-area bg-white rounded-2xl shadow-lg p-6 font-ticket">
         <div className="text-center mb-4">
           <img src={BRAND.logo} alt="Serengeti" className="h-10 mx-auto mb-2" />
           <div className="font-display text-xl font-600 tracking-wide text-[#16261F]">Serengeti · The Eden Park</div>
@@ -1183,9 +1277,14 @@ function BillReceipt({ bill, onClose }) {
         <div className="text-center text-[10px] text-[#9C9686] mt-4 uppercase tracking-widest">Thank you for dining with us</div>
       </div>
       <div className="flex gap-2 mt-4 no-print">
+        <button onClick={sendOnWhatsApp} disabled={sending}
+          className="flex-1 bg-[#25D366] disabled:opacity-50 text-white py-3 rounded-full text-sm font-ui font-semibold uppercase flex items-center justify-center gap-2 shadow-lg">
+          {sending ? <Loader2 size={16} className="animate-spin" /> : <MessageCircle size={16} />} {sending ? "Preparing…" : "Send on WhatsApp"}
+        </button>
         <button onClick={() => window.print()} className="flex-1 bg-[#16261F] text-white py-3 rounded-full text-sm font-ui font-semibold uppercase flex items-center justify-center gap-2 shadow-lg"><Printer size={16} /> Print</button>
-        <button onClick={onClose} className="flex-1 bg-[#F0EBDD] text-[#16261F] py-3 rounded-full text-sm font-ui font-semibold uppercase">Close Table</button>
       </div>
+      {sendMsg && <p className="text-xs font-ui text-[#5c5648] mt-2 text-center no-print">{sendMsg}</p>}
+      <button onClick={onClose} className="w-full mt-2 bg-[#F0EBDD] text-[#16261F] py-3 rounded-full text-sm font-ui font-semibold uppercase no-print">Close Table</button>
     </div>
   );
 }
