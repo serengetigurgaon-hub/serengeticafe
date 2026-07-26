@@ -1869,7 +1869,7 @@ function PartyBookings({ parties, setParties, currentUser }) {
       {view === "week" ? (
         <WeekView anchor={anchor} bookingFor={bookingFor} onBookSlot={openBookingForm} onSelectBooking={setBillFor} onRemove={removeBooking} />
       ) : (
-        <MonthView anchor={anchor} parties={parties} onSelectDay={(d) => { setAnchor(d); setView("week"); }} />
+        <MonthView anchor={anchor} parties={parties} onSelectDay={(d) => { setAnchor(d); setView("week"); }} onSelectBooking={setBillFor} onBookSlot={openBookingForm} />
       )}
 
       {formOpen && (
@@ -1931,12 +1931,13 @@ function WeekView({ anchor, bookingFor, onBookSlot, onSelectBooking, onRemove })
   );
 }
 
-function MonthView({ anchor, parties, onSelectDay }) {
+function MonthView({ anchor, parties, onSelectDay, onSelectBooking, onBookSlot }) {
   const monthStart = startOfMonth(anchor);
   const gridStart = startOfWeek(monthStart);
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
   const bookingsByDate = {};
   parties.forEach((p) => { (bookingsByDate[p.date] = bookingsByDate[p.date] || []).push(p); });
+  const [expandedDate, setExpandedDate] = useState(null);
 
   return (
     <div className="bg-white rounded-2xl shadow-md p-3">
@@ -1952,7 +1953,7 @@ function MonthView({ anchor, parties, onSelectDay }) {
           const isToday = dateStr === todayDateStr();
           const dayBookings = bookingsByDate[dateStr] || [];
           return (
-            <button key={dateStr} onClick={() => onSelectDay(d)}
+            <button key={dateStr} onClick={() => setExpandedDate(dateStr)}
               className={`rounded-xl p-1.5 text-left min-h-[64px] border ${isToday ? "border-[#C9A66B]" : "border-[#F0EBDD]"} ${inMonth ? "bg-white" : "bg-[#FAF8F2] opacity-50"}`}>
               <div className="font-ticket text-xs text-[#16261F]">{d.getDate()}</div>
               <div className="flex gap-0.5 mt-1 flex-wrap">
@@ -1965,7 +1966,45 @@ function MonthView({ anchor, parties, onSelectDay }) {
           );
         })}
       </div>
-      <p className="text-[10px] text-[#9C9686] font-ui mt-3">Dots show the 3 party slots for that day — filled means booked. Tap a day to open its week view.</p>
+      <p className="text-[10px] text-[#9C9686] font-ui mt-3">Dots show the 3 party slots for that day — filled means booked. Tap a day to see or add bookings.</p>
+
+      {expandedDate && (
+        <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center px-4" onClick={() => setExpandedDate(null)}>
+          <div className="bg-white rounded-3xl p-5 w-full max-w-sm shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-3">
+              <p className="font-display text-lg font-600 text-[#16261F]">{new Date(expandedDate).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+              <button onClick={() => setExpandedDate(null)} className="p-1 hover:bg-[#F0EBDD] rounded-full"><X size={18} /></button>
+            </div>
+            <div className="space-y-2">
+              {PARTY_SLOTS.map((slot) => {
+                const booking = (bookingsByDate[expandedDate] || []).find((b) => b.slot === slot.id);
+                return (
+                  <div key={slot.id}>
+                    {booking ? (
+                      <button onClick={() => { onSelectBooking(booking); setExpandedDate(null); }}
+                        className={`w-full text-left rounded-xl px-3 py-2.5 border ${booking.package === "premium" ? "bg-[#C9A66B]/15 border-[#C9A66B]/40" : "bg-[#7C8F5E]/15 border-[#7C8F5E]/40"}`}>
+                        <div className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686]">{slot.label}</div>
+                        <div className="text-sm font-ui font-semibold text-[#16261F]">{booking.customerName} — {booking.kids} kids, {booking.adults} adults</div>
+                        <div className="text-[10px] font-ui uppercase tracking-wide" style={{ color: booking.package === "premium" ? "#8a6f42" : "#557052" }}>{PACKAGES[booking.package]} · {money(booking.total)}{booking.billed ? " · Billed" : ""}</div>
+                      </button>
+                    ) : (
+                      <button onClick={() => { onBookSlot(expandedDate, slot.id); setExpandedDate(null); }}
+                        className="w-full text-left rounded-xl px-3 py-2.5 border border-dashed border-[#DCD5C0] text-[#C9A66B]">
+                        <div className="text-[10px] font-ui uppercase tracking-widest">{slot.label}</div>
+                        <div className="text-xs font-ui flex items-center gap-1 mt-0.5"><Plus size={12} /> Free — tap to book</div>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={() => { onSelectDay(new Date(expandedDate)); setExpandedDate(null); }}
+              className="w-full mt-4 bg-[#F0EBDD] text-[#16261F] py-2.5 rounded-full text-xs font-ui font-semibold uppercase tracking-wide">
+              View Full Week
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1974,7 +2013,7 @@ function PartyBookingForm({ prefill, onClose, onSave, bookingFor }) {
   const [form, setForm] = useState({
     date: prefill?.date || todayDateStr(), slot: prefill?.slot || PARTY_SLOTS[0].id,
     customerName: "", customerPhone: "", kids: "", adults: "",
-    package: "standard", packagePrice: "", addOns: [], addOnForm: { name: "", price: "" },
+    package: "standard", kidUnitPrice: "", adultUnitPrice: "", addOns: [], addOnForm: { name: "", price: "" },
   });
   const [error, setError] = useState("");
 
@@ -1986,16 +2025,27 @@ function PartyBookingForm({ prefill, onClose, onSave, bookingFor }) {
 
   const conflict = bookingFor(form.date, form.slot);
 
+  const kids = parseInt(form.kids) || 0;
+  const adults = parseInt(form.adults) || 0;
+  const kidUnitPrice = parseFloat(form.kidUnitPrice) || 0;
+  const adultUnitPrice = parseFloat(form.adultUnitPrice) || 0;
+  const kidsTotal = kids * kidUnitPrice;
+  const adultsTotal = adults * adultUnitPrice;
+  const addOnsTotal = form.addOns.reduce((s, a) => s + a.price, 0);
+  const grandTotal = kidsTotal + adultsTotal + addOnsTotal;
+
   const submit = (e) => {
     e.preventDefault();
-    if (!form.customerName.trim() || !form.kids || !form.adults || !form.packagePrice) { setError("Customer name, kids/adults count, and package price are required."); return; }
+    if (!form.customerName.trim() || !form.kids || !form.adults || !form.kidUnitPrice || !form.adultUnitPrice) {
+      setError("Customer name, kids/adults count, and both unit prices are required.");
+      return;
+    }
     if (conflict) { setError("That date and slot is already booked — pick a different slot."); return; }
     setError("");
-    const total = parseFloat(form.packagePrice) + form.addOns.reduce((s, a) => s + a.price, 0);
     onSave({
       date: form.date, slot: form.slot, customerName: form.customerName.trim(), customerPhone: form.customerPhone.trim(),
-      kids: parseInt(form.kids), adults: parseInt(form.adults), package: form.package, packagePrice: parseFloat(form.packagePrice),
-      addOns: form.addOns, total,
+      kids, adults, package: form.package, kidUnitPrice, adultUnitPrice, kidsTotal, adultsTotal,
+      addOns: form.addOns, total: grandTotal,
     });
   };
 
@@ -2024,28 +2074,46 @@ function PartyBookingForm({ prefill, onClose, onSave, bookingFor }) {
           <input placeholder="Customer name" value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm" />
           <input placeholder="Customer phone (optional, for WhatsApp)" value={form.customerPhone} onChange={(e) => setForm({ ...form, customerPhone: e.target.value })} inputMode="tel" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm" />
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">No. of Kids</label>
-              <input value={form.kids} onChange={(e) => setForm({ ...form, kids: e.target.value })} inputMode="numeric" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket" />
-            </div>
-            <div>
-              <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">No. of Adults</label>
-              <input value={form.adults} onChange={(e) => setForm({ ...form, adults: e.target.value })} inputMode="numeric" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket" />
-            </div>
+          <div>
+            <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">Package</label>
+            <select value={form.package} onChange={(e) => setForm({ ...form, package: e.target.value })} className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1">
+              <option value="standard">Standard</option>
+              <option value="premium">Premium</option>
+            </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">Package</label>
-              <select value={form.package} onChange={(e) => setForm({ ...form, package: e.target.value })} className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1">
-                <option value="standard">Standard</option>
-                <option value="premium">Premium</option>
-              </select>
+          <div className="bg-[#FAF8F2] rounded-2xl p-3 space-y-3">
+            <div className="grid grid-cols-2 gap-3 items-end">
+              <div>
+                <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">No. of Kids</label>
+                <input value={form.kids} onChange={(e) => setForm({ ...form, kids: e.target.value })} inputMode="numeric" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket bg-white" />
+              </div>
+              <div>
+                <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">Price / Kid</label>
+                <input value={form.kidUnitPrice} onChange={(e) => setForm({ ...form, kidUnitPrice: e.target.value })} inputMode="decimal" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket bg-white" placeholder="₹" />
+              </div>
             </div>
-            <div>
-              <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">Package Price</label>
-              <input value={form.packagePrice} onChange={(e) => setForm({ ...form, packagePrice: e.target.value })} inputMode="decimal" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket" placeholder="₹" />
+            <div className="flex justify-between text-xs font-ui text-[#5c5648]">
+              <span>Kids subtotal ({kids} × {money(kidUnitPrice)})</span>
+              <span className="font-ticket font-medium text-[#16261F]">{money(kidsTotal)}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 items-end pt-1 border-t border-[#EAE4D3]">
+              <div>
+                <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">No. of Adults</label>
+                <input value={form.adults} onChange={(e) => setForm({ ...form, adults: e.target.value })} inputMode="numeric" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket bg-white" />
+              </div>
+              <div>
+                <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium">Price / Adult</label>
+                <input value={form.adultUnitPrice} onChange={(e) => setForm({ ...form, adultUnitPrice: e.target.value })} inputMode="decimal" className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm mt-1 font-ticket bg-white" placeholder="₹" />
+              </div>
+            </div>
+            <div className="flex justify-between text-xs font-ui text-[#5c5648]">
+              <span>Adults subtotal ({adults} × {money(adultUnitPrice)})</span>
+              <span className="font-ticket font-medium text-[#16261F]">{money(adultsTotal)}</span>
+            </div>
+            <div className="flex justify-between text-sm font-ui font-semibold text-[#16261F] pt-1 border-t border-[#EAE4D3]">
+              <span>Package Subtotal</span>
+              <span className="font-ticket">{money(kidsTotal + adultsTotal)}</span>
             </div>
           </div>
 
@@ -2066,8 +2134,8 @@ function PartyBookingForm({ prefill, onClose, onSave, bookingFor }) {
 
           {error && <p className="text-[#C1694F] text-xs font-ui">{error}</p>}
           <div className="flex justify-between font-display font-600 text-lg text-[#16261F] border-t border-[#F0EBDD] pt-3">
-            <span>Total</span>
-            <span className="text-[#8a6f42]">{money((parseFloat(form.packagePrice) || 0) + form.addOns.reduce((s, a) => s + a.price, 0))}</span>
+            <span>Final Total</span>
+            <span className="text-[#8a6f42]">{money(grandTotal)}</span>
           </div>
           <button type="submit" className="w-full bg-[#16261F] text-white py-3 rounded-full text-sm font-ui font-semibold uppercase tracking-wide shadow-lg flex items-center justify-center gap-2">
             <PartyPopper size={16} /> Confirm Booking
@@ -2135,7 +2203,14 @@ function PartyBillModal({ booking, onClose, onBilled, onDelete }) {
           <div className="flex justify-between text-xs mb-3"><span>Guests</span><span>{booking.kids} kids · {booking.adults} adults</span></div>
           <div className="perf mb-3" />
           <div className="space-y-1 text-sm mb-3">
-            <div className="flex justify-between"><span>{PACKAGES[booking.package]} Package</span><span>{money(booking.packagePrice)}</span></div>
+            {booking.kidUnitPrice !== undefined ? (
+              <>
+                <div className="flex justify-between"><span>{PACKAGES[booking.package]} — Kids × {booking.kids} ({money(booking.kidUnitPrice)}/kid)</span><span>{money(booking.kidsTotal)}</span></div>
+                <div className="flex justify-between"><span>{PACKAGES[booking.package]} — Adults × {booking.adults} ({money(booking.adultUnitPrice)}/adult)</span><span>{money(booking.adultsTotal)}</span></div>
+              </>
+            ) : (
+              <div className="flex justify-between"><span>{PACKAGES[booking.package]} Package</span><span>{money(booking.packagePrice)}</span></div>
+            )}
             {booking.addOns.map((a) => <div key={a.id} className="flex justify-between"><span>{a.name}</span><span>{money(a.price)}</span></div>)}
           </div>
           <div className="perf mb-3" />
