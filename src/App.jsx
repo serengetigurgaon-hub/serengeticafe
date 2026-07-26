@@ -304,13 +304,16 @@ function useOrderNotifications(orders, currentUser) {
 
     const nextMap = {};
     let newOrderForChef = null;
+    let reopenedForChef = null;
     let statusChangeForOthers = null;
 
     orders.forEach((o) => {
       nextMap[o.id] = o.status;
-      if (!(o.id in prev)) {
+      const isNew = !(o.id in prev);
+      if (isNew) {
         if (currentUser.role === "chef" && o.status === "pending") newOrderForChef = o;
       } else if (prev[o.id] !== o.status) {
+        if (currentUser.role === "chef" && o.status === "pending") reopenedForChef = o;
         if (currentUser.role === "server" || currentUser.role === "manager" || currentUser.role === "owner") {
           statusChangeForOthers = o;
         }
@@ -321,6 +324,9 @@ function useOrderNotifications(orders, currentUser) {
     if (newOrderForChef) {
       playNewOrderAlert();
       setToast({ tone: "new", title: `New order — Table ${newOrderForChef.table}`, subtitle: `${newOrderForChef.items.length} item${newOrderForChef.items.length !== 1 ? "s" : ""} from ${newOrderForChef.serverName}` });
+    } else if (reopenedForChef) {
+      playNewOrderAlert();
+      setToast({ tone: "new", title: `More dishes added — Table ${reopenedForChef.table}`, subtitle: `${reopenedForChef.items.length} item${reopenedForChef.items.length !== 1 ? "s" : ""} total on this order now` });
     } else if (statusChangeForOthers) {
       playStatusAlert();
       setToast({ tone: "status", title: `Table ${statusChangeForOthers.table} → ${STATUS_LABEL[statusChangeForOthers.status]}`, subtitle: "Updated by the kitchen" });
@@ -669,15 +675,15 @@ function Tag({ children, tone = "default" }) {
 // ---------------------------------------------------------------------------
 // Order Ticket (shared visual component — kitchen/ops functional views)
 // ---------------------------------------------------------------------------
-function OrderTicket({ order, footer }) {
+function OrderTicket({ order, footer, onAddItems }) {
   const stubColor = order.urgent ? "#C1694F" : order.quick ? "#C9A66B" : "#5B8FA3";
-  const mins = Math.max(0, Math.round((Date.now() - new Date(order.createdAt).getTime()) / 60000));
+  const mins = Math.max(0, Math.round((Date.now() - new Date(order.updatedAt || order.createdAt).getTime()) / 60000));
   return (
     <div className="bg-white rounded-2xl shadow-md border-l-[6px] overflow-hidden" style={{ borderColor: stubColor }}>
       <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="font-display text-xl font-600 text-[#16261F] leading-tight">Table {order.table}</div>
-          <div className="font-ticket text-[10px] text-[#9C9686] uppercase tracking-widest truncate">{order.serverName} · {mins}m ago</div>
+          <div className="font-ticket text-[10px] text-[#9C9686] uppercase tracking-widest truncate">{order.serverName} · {mins}m ago{order.updatedAt ? " (updated)" : ""}</div>
         </div>
         <div className="flex gap-1 flex-wrap justify-end shrink-0">
           {order.urgent && <Tag tone="urgent">Rush</Tag>}
@@ -697,6 +703,13 @@ function OrderTicket({ order, footer }) {
           </div>
         ))}
       </div>
+      {onAddItems && !order.billed && (
+        <div className="px-4 pb-2">
+          <button onClick={onAddItems} className="w-full border border-dashed border-[#C9A66B] text-[#8a6f42] py-2 rounded-full text-xs font-ui font-semibold uppercase tracking-wide flex items-center justify-center gap-1.5">
+            <Plus size={13} /> Add Dishes to This Order
+          </button>
+        </div>
+      )}
       {footer && <div className="px-4 pb-4">{footer}</div>}
     </div>
   );
@@ -800,6 +813,7 @@ function ServerDashboard({ currentUser, menu, orders, setOrders }) {
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
+  const [addingToOrder, setAddingToOrder] = useState(null);
 
   const categories = [...new Set(menu.map((m) => m.category))];
   const available = menu.filter((m) =>
@@ -839,6 +853,17 @@ function ServerDashboard({ currentUser, menu, orders, setOrders }) {
     };
     setOrders([newOrder, ...orders]);
     setCart([]); setUrgent(false); setQuick(false); setTable("");
+  };
+
+  // Appends newly-ordered dishes onto an existing, not-yet-billed order —
+  // and reopens it to "pending" so the kitchen knows there's fresh work,
+  // even if the original order had already been marked Sent.
+  const addItemsToOrder = (order, newItems) => {
+    setOrders(orders.map((o) => o.id === order.id
+      ? { ...o, items: [...o.items, ...newItems], status: "pending", updatedAt: new Date().toISOString() }
+      : o
+    ));
+    setAddingToOrder(null);
   };
 
   // Every logged-in device shares the same Firestore data, so this list is
@@ -886,7 +911,7 @@ function ServerDashboard({ currentUser, menu, orders, setOrders }) {
           <div className="font-display text-xl font-600 text-[#16261F] mb-3 flex items-center gap-2 no-print"><Clock size={18} /> Live Orders — All Tables</div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {activeOrders.length === 0 && <p className="text-sm text-[#9C9686] font-ui col-span-full">No active orders right now.</p>}
-            {activeOrders.map((o) => <OrderTicket key={o.id} order={o} />)}
+            {activeOrders.map((o) => <OrderTicket key={o.id} order={o} onAddItems={() => setAddingToOrder(o)} />)}
           </div>
         </div>
 
@@ -936,6 +961,105 @@ function ServerDashboard({ currentUser, menu, orders, setOrders }) {
           <span className="font-ui text-sm font-semibold flex items-center gap-1">View Order <ArrowRight size={14} /></span>
         </button>
       )}
+
+      {addingToOrder && (
+        <AddItemsModal order={addingToOrder} menu={menu} onClose={() => setAddingToOrder(null)}
+          onSubmit={(newItems) => addItemsToOrder(addingToOrder, newItems)} />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Add dishes to an already-placed, unbilled order
+// ---------------------------------------------------------------------------
+function AddItemsModal({ order, menu, onClose, onSubmit }) {
+  const [cart, setCart] = useState([]);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("All");
+
+  const categories = [...new Set(menu.map((m) => m.category))];
+  const available = menu.filter((m) =>
+    m.available !== false &&
+    m.name.toLowerCase().includes(search.toLowerCase()) &&
+    (category === "All" || m.category === category)
+  );
+
+  const cartQtyFor = (itemId) => cart.filter((l) => l.menuItemId === itemId).reduce((s, l) => s + l.qty, 0);
+  const addToCart = (item) => {
+    setCart((c) => {
+      const exists = c.find((x) => x.menuItemId === item.id && !x.remarks);
+      if (exists) return c.map((x) => x === exists ? { ...x, qty: x.qty + 1 } : x);
+      return [...c, { id: uid(), menuItemId: item.id, name: item.name, price: item.price, qty: 1, remarks: "" }];
+    });
+  };
+  const removeOne = (item) => {
+    setCart((c) => {
+      const line = c.find((x) => x.menuItemId === item.id && !x.remarks);
+      if (!line) return c;
+      if (line.qty <= 1) return c.filter((x) => x !== line);
+      return c.map((x) => x === line ? { ...x, qty: x.qty - 1 } : x);
+    });
+  };
+  const updateLine = (id, patch) => setCart((c) => c.map((l) => l.id === id ? { ...l, ...patch } : l));
+  const removeLine = (id) => setCart((c) => c.filter((l) => l.id !== id));
+  const total = cart.reduce((s, l) => s + l.price * l.qty, 0);
+
+  return (
+    <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center px-4 py-8" onClick={onClose}>
+      <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 sticky top-0 bg-white border-b border-[#F0EBDD] flex justify-between items-center z-10">
+          <div>
+            <div className="font-display text-xl font-600 text-[#16261F]">Add Dishes — Table {order.table}</div>
+            <div className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686]">Adds to the existing order — the kitchen is notified</div>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-[#F0EBDD] rounded-full shrink-0"><X size={18} /></button>
+        </div>
+        <div className="p-5">
+          <div className="relative mb-3">
+            <Search size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#9C9686]" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search the menu…"
+              className="w-full border border-[#EAE4D3] bg-white pl-11 pr-4 py-2.5 rounded-full text-sm" />
+          </div>
+          <CategoryChips categories={categories} selected={category} onSelect={setCategory} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-5">
+            {available.length === 0 && <p className="text-sm text-[#9C9686] font-ui col-span-full">No dishes found.</p>}
+            {available.map((item) => (
+              <DishCard key={item.id} item={item} qty={cartQtyFor(item.id)} onAdd={addToCart} onRemove={removeOne} />
+            ))}
+          </div>
+          {cart.length > 0 && (
+            <div className="bg-[#FAF8F2] rounded-2xl p-4">
+              <div className="font-ui font-semibold text-sm text-[#16261F] mb-2">New items to add</div>
+              <div className="space-y-2 mb-3 max-h-[35vh] overflow-y-auto">
+                {cart.map((l) => (
+                  <div key={l.id} className="border-b border-dashed border-[#F0EBDD] pb-2">
+                    <div className="flex items-center justify-between text-sm gap-2">
+                      <span className="text-[#16261F] truncate">{l.name}</span>
+                      <button onClick={() => removeLine(l.id)} className="shrink-0"><Trash2 size={14} className="text-[#C1694F]" /></button>
+                    </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => updateLine(l.id, { qty: Math.max(1, l.qty - 1) })} className="w-6 h-6 flex items-center justify-center bg-[#F0EBDD] rounded-full"><Minus size={12} /></button>
+                        <span className="font-ticket text-sm w-4 text-center">{l.qty}</span>
+                        <button onClick={() => updateLine(l.id, { qty: l.qty + 1 })} className="w-6 h-6 flex items-center justify-center bg-[#F0EBDD] rounded-full"><Plus size={12} /></button>
+                      </div>
+                      <span className="font-ticket text-sm text-[#8a6f42]">{money(l.price * l.qty)}</span>
+                    </div>
+                    <input value={l.remarks} onChange={(e) => updateLine(l.id, { remarks: e.target.value })} placeholder="remarks e.g. no onions"
+                      className="w-full mt-1.5 border border-[#F0EBDD] rounded-xl px-2.5 py-1.5 text-xs font-ticket" />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between font-display font-600 text-base text-[#16261F] mb-3"><span>Adding</span><span>{money(total)}</span></div>
+              <button onClick={() => onSubmit(cart)}
+                className="w-full bg-[#16261F] text-white py-3 rounded-full text-sm font-ui font-semibold uppercase tracking-wide shadow-lg flex items-center justify-center gap-2">
+                <Plus size={16} /> Add to Order
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1061,7 +1185,7 @@ function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, ord
       <div>
         {tab === "dashboard" && <AnalyticsDashboard orders={orders} menu={menu} />}
         {tab === "menu" && <MenuManager menu={menu} setMenu={setMenu} />}
-        {tab === "orders" && <OrdersOverview orders={orders} />}
+        {tab === "orders" && <OrdersOverview orders={orders} setOrders={setOrders} menu={menu} />}
         {tab === "billing" && <Billing orders={orders} setOrders={setOrders} bills={bills} setBills={setBills} />}
         {tab === "history" && <BillHistory bills={bills} parties={parties} />}
         {tab === "parties" && <PartyBookings parties={parties} setParties={setParties} currentUser={currentUser} />}
@@ -1333,12 +1457,26 @@ function AnalyticsDashboard({ orders, menu }) {
   );
 }
 
-function OrdersOverview({ orders }) {
+function OrdersOverview({ orders, setOrders, menu }) {
   const active = orders.filter(o => !o.billed).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const [addingToOrder, setAddingToOrder] = useState(null);
+  const addItemsToOrder = (order, newItems) => {
+    setOrders(orders.map((o) => o.id === order.id
+      ? { ...o, items: [...o.items, ...newItems], status: "pending", updatedAt: new Date().toISOString() }
+      : o
+    ));
+    setAddingToOrder(null);
+  };
   return (
-    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {active.length === 0 && <p className="text-sm text-[#9C9686] font-ui">No active orders right now.</p>}
-      {active.map((o) => <OrderTicket key={o.id} order={o} />)}
+    <div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {active.length === 0 && <p className="text-sm text-[#9C9686] font-ui">No active orders right now.</p>}
+        {active.map((o) => <OrderTicket key={o.id} order={o} onAddItems={() => setAddingToOrder(o)} />)}
+      </div>
+      {addingToOrder && (
+        <AddItemsModal order={addingToOrder} menu={menu} onClose={() => setAddingToOrder(null)}
+          onSubmit={(newItems) => addItemsToOrder(addingToOrder, newItems)} />
+      )}
     </div>
   );
 }
