@@ -103,9 +103,12 @@ const STATUS_NEXT_LABEL = { pending: "Start Preparing", preparing: "Mark Complet
 // Sound alerts — generated tones (no audio file to host). Browsers block
 // audio until the page has had a user gesture (a click/tap), so we "unlock"
 // the shared AudioContext on login — after that, alerts can fire on their
-// own. Gain is set to the maximum the browser allows (1.0); a web app can't
-// change the device's physical/system volume, only how loud its own sound
-// plays within that.
+// own. This plays as loud as a browser will allow: square waves (richer,
+// more piercing than a plain sine at the same volume), a stacked octave
+// layer, alarm-range frequencies (the band human hearing is most sensitive
+// to), and a compressor/limiter to push the average loudness close to peak.
+// None of this can exceed the device's physical volume setting — a website
+// can't override that, only max out what it's allowed to play within it.
 // ---------------------------------------------------------------------------
 let sharedAudioCtx = null;
 function unlockAudio() {
@@ -118,25 +121,44 @@ function playAlertTone(pattern) {
   try {
     if (!sharedAudioCtx) sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (sharedAudioCtx.state === "suspended") sharedAudioCtx.resume();
-    let t = sharedAudioCtx.currentTime;
+    const ctx = sharedAudioCtx;
+
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.setValueAtTime(-16, ctx.currentTime);
+    limiter.knee.setValueAtTime(4, ctx.currentTime);
+    limiter.ratio.setValueAtTime(16, ctx.currentTime);
+    limiter.attack.setValueAtTime(0.002, ctx.currentTime);
+    limiter.release.setValueAtTime(0.12, ctx.currentTime);
+    limiter.connect(ctx.destination);
+
+    let t = ctx.currentTime;
+    const noteLen = 0.24;
+    const gap = 0.06;
     pattern.forEach((freq) => {
-      const osc = sharedAudioCtx.createOscillator();
-      const gain = sharedAudioCtx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(1, t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
-      osc.connect(gain);
-      gain.connect(sharedAudioCtx.destination);
-      osc.start(t);
-      osc.stop(t + 0.34);
-      t += 0.36;
+      // fundamental + octave layer, both square waves — this is what makes
+      // it sound like a loud alarm rather than a soft beep at the same volume
+      [{ f: freq, peak: 1 }, { f: freq * 2, peak: 0.6 }].forEach(({ f, peak }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "square";
+        osc.frequency.value = f;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(peak, t + 0.012);
+        gain.gain.setValueAtTime(peak, t + noteLen - 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + noteLen);
+        osc.connect(gain);
+        gain.connect(limiter);
+        osc.start(t);
+        osc.stop(t + noteLen + 0.02);
+      });
+      t += noteLen + gap;
     });
   } catch (e) { /* ignore — visual toast still shows */ }
 }
-const playNewOrderAlert = () => playAlertTone([880, 660, 880, 660, 880]);
-const playStatusAlert = () => playAlertTone([740, 990]);
+// Alarm-range frequencies (~1-2kHz) read as loudest/most urgent to human ears;
+// the chef's alert repeats longer since it needs to cut through a busy kitchen.
+const playNewOrderAlert = () => playAlertTone([1046, 784, 1046, 784, 1046, 784]);
+const playStatusAlert = () => playAlertTone([880, 1174]);
 
 // ---------------------------------------------------------------------------
 // Root App
