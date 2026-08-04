@@ -4,7 +4,8 @@ import {
   Check, Clock, Flame, Zap, Printer, X, Pencil, Save, ArrowRight,
   Search, ClipboardList, ShieldCheck, CircleDot, ImagePlus, Loader2, Leaf,
   ShoppingBag, Home, LayoutDashboard, TrendingUp, Utensils, MessageCircle,
-  Bell, Volume2, PartyPopper, ChevronLeft, ChevronRight, History, Cake, Baby
+  Bell, Volume2, PartyPopper, ChevronLeft, ChevronRight, History, Cake, Baby,
+  ListChecks, AlertTriangle
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from "recharts";
 import html2canvas from "html2canvas";
@@ -42,7 +43,7 @@ const BRAND = {
 
 // All shared restaurant data lives in one Firestore collection, "restaurant",
 // as four documents: profiles / menu / orders / bills — each holding { data: [...] }.
-const KEYS = { profiles: "profiles", menu: "menu", orders: "orders", bills: "bills", parties: "parties" };
+const KEYS = { profiles: "profiles", menu: "menu", orders: "orders", bills: "bills", parties: "parties", checklists: "checklists" };
 const COLLECTION = "restaurant";
 
 function docRef(key) {
@@ -169,8 +170,9 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [bills, setBills] = useState([]);
   const [parties, setParties] = useState([]);
+  const [checklists, setChecklists] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loaded, setLoaded] = useState({ profiles: false, menu: false, orders: false, bills: false, parties: false });
+  const [loaded, setLoaded] = useState({ profiles: false, menu: false, orders: false, bills: false, parties: false, checklists: false });
   const [currentUser, setCurrentUser] = useState(null);
   const [syncedAt, setSyncedAt] = useState(null);
   const [globalView, setGlobalView] = useState("home");
@@ -187,6 +189,7 @@ export default function App() {
       subscribe(KEYS.orders, (v) => { setOrders(v); markLoaded("orders"); setSyncedAt(new Date()); }),
       subscribe(KEYS.bills, (v) => { setBills(v); markLoaded("bills"); setSyncedAt(new Date()); }),
       subscribe(KEYS.parties, (v) => { setParties(v); markLoaded("parties"); setSyncedAt(new Date()); }),
+      subscribe(KEYS.checklists, (v) => { setChecklists(v); markLoaded("checklists"); setSyncedAt(new Date()); }),
     ];
     return () => unsubs.forEach((u) => u());
   }, []);
@@ -205,7 +208,8 @@ export default function App() {
     menu: (n) => { setMenu(n); persistToFirestore(KEYS.menu, n); },
     orders: (n) => { setOrders(n); persistToFirestore(KEYS.orders, n); },
     bills: (n) => { setBills(n); persistToFirestore(KEYS.bills, n); },
-    parties: (n) => { setParties(n); persistToFirestore(KEYS.parties, n); } };
+    parties: (n) => { setParties(n); persistToFirestore(KEYS.parties, n); },
+    checklists: (n) => { setChecklists(n); persistToFirestore(KEYS.checklists, n); } };
 
   // Every role can take orders like a server, not just server logins. Server
   // accounts always land straight on order-taking (that's their whole job);
@@ -268,6 +272,7 @@ export default function App() {
                   orders={orders} setOrders={persist.orders}
                   bills={bills} setBills={persist.bills}
                   parties={parties} setParties={persist.parties}
+                  checklists={checklists} setChecklists={persist.checklists}
                 />
               )}
               {currentUser.role === "chef" && (
@@ -722,18 +727,20 @@ function NavTabs({ tabs, current, onChange }) {
   return (
     <>
       <div className="hidden sm:flex gap-1 mb-5 bg-[#F0EBDD] rounded-full p-1 w-fit no-print">
-        {tabs.map(([key, label, Icon]) => (
+        {tabs.map(([key, label, Icon, badge]) => (
           <button key={key} onClick={() => onChange(key)}
-            className={`px-4 py-2 rounded-full text-sm font-ui font-medium flex items-center gap-2 transition ${current === key ? "bg-[#16261F] text-white shadow-md" : "text-[#5c5648] hover:text-[#16261F]"}`}>
+            className={`relative px-4 py-2 rounded-full text-sm font-ui font-medium flex items-center gap-2 transition ${current === key ? "bg-[#16261F] text-white shadow-md" : "text-[#5c5648] hover:text-[#16261F]"}`}>
             <Icon size={15} /> {label}
+            {!!badge && <span className="absolute -top-1 -right-1 bg-[#C1694F] text-white text-[9px] font-ui font-bold w-4 h-4 rounded-full flex items-center justify-center">{badge}</span>}
           </button>
         ))}
       </div>
       <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-[#F0EBDD] shadow-[0_-4px_24px_rgba(0,0,0,0.1)] flex justify-around py-1.5 no-print" style={{ paddingBottom: "max(0.4rem, env(safe-area-inset-bottom))" }}>
-        {tabs.map(([key, label, Icon]) => (
-          <button key={key} onClick={() => onChange(key)} className="flex flex-col items-center gap-0.5 px-3 py-1.5">
+        {tabs.map(([key, label, Icon, badge]) => (
+          <button key={key} onClick={() => onChange(key)} className="relative flex flex-col items-center gap-0.5 px-3 py-1.5">
             <Icon size={20} className={current === key ? "text-[#C9A66B]" : "text-[#9C9686]"} />
             <span className={`text-[9px] font-ui uppercase tracking-wide ${current === key ? "text-[#16261F] font-semibold" : "text-[#9C9686]"}`}>{label}</span>
+            {!!badge && <span className="absolute top-0 right-1 bg-[#C1694F] text-white text-[8px] font-ui font-bold w-3.5 h-3.5 rounded-full flex items-center justify-center">{badge}</span>}
           </button>
         ))}
       </div>
@@ -1165,8 +1172,9 @@ function AvailabilityBoard({ menu, setMenu }) {
 // ---------------------------------------------------------------------------
 // ADMIN DASHBOARD (owner / manager)
 // ---------------------------------------------------------------------------
-function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, orders, setOrders, bills, setBills, parties, setParties }) {
-  const tabsBase = [["dashboard", "Dashboard", LayoutDashboard], ["menu", "Menu", UtensilsCrossed], ["orders", "Orders", Clock], ["billing", "Billing", Receipt], ["history", "Bill History", History], ["parties", "Parties", PartyPopper]];
+function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, orders, setOrders, bills, setBills, parties, setParties, checklists, setChecklists }) {
+  const missingWeekends = countMissingWeekendChecklists(checklists);
+  const tabsBase = [["dashboard", "Dashboard", LayoutDashboard], ["menu", "Menu", UtensilsCrossed], ["orders", "Orders", Clock], ["billing", "Billing", Receipt], ["history", "Bill History", History], ["parties", "Parties", PartyPopper], ["checklist", "Checklist", ListChecks, missingWeekends]];
   const tabs = currentUser.role === "owner" ? [...tabsBase, ["staff", "Staff", Users]] : tabsBase;
   const [tab, setTab] = useState("dashboard");
 
@@ -1189,6 +1197,7 @@ function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, ord
         {tab === "billing" && <Billing orders={orders} setOrders={setOrders} bills={bills} setBills={setBills} />}
         {tab === "history" && <BillHistory bills={bills} parties={parties} />}
         {tab === "parties" && <PartyBookings parties={parties} setParties={setParties} currentUser={currentUser} />}
+        {tab === "checklist" && <ChecklistModule checklists={checklists} setChecklists={setChecklists} currentUser={currentUser} />}
         {tab === "staff" && currentUser.role === "owner" && <StaffManager profiles={profiles} setProfiles={setProfiles} currentUser={currentUser} />}
       </div>
     </div>
@@ -2228,6 +2237,350 @@ function PartyBillModal({ booking, onClose, onBilled, onDelete }) {
           {!booking.billed && <button onClick={() => onBilled(booking.total)} className="flex-1 bg-[#7C8F5E] text-white py-2.5 rounded-full text-xs font-ui font-semibold uppercase">Mark as Billed</button>}
           <button onClick={onDelete} className="flex-1 bg-[#F0EBDD] text-[#C1694F] py-2.5 rounded-full text-xs font-ui font-semibold uppercase">Cancel Booking</button>
           <button onClick={onClose} className="flex-1 bg-[#F0EBDD] text-[#16261F] py-2.5 rounded-full text-xs font-ui font-semibold uppercase">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CHECKLIST — daily guest-readiness checklist (owner + manager)
+// ---------------------------------------------------------------------------
+const CHECKLIST_SECTIONS = [
+  { key: "aviary", title: "🦜 एवियरी और फव्वारा", items: [
+    "फव्वारा चल रहा है, पानी साफ है, काई/बदबू नहीं",
+    "जाली/तार बरकरार, कोई गैप नहीं",
+    "दाना-पानी के बर्तन भरे और साफ",
+    "बीट/गंदगी साफ, फर्श धोया गया",
+    "पास जाने पर कोई बदबू नहीं",
+  ]},
+  { key: "fishpond", title: "🐟 मछली तालाब", items: [
+    "पानी साफ, फिल्टर/एरेटर चालू",
+    "कोई मरी मछली/कचरा नहीं",
+    "कोई सड़ी हुई बदबू नहीं",
+    "आसपास का रास्ता साफ व सूखा",
+  ]},
+  { key: "piglets", title: "🐷 सुअर के बच्चों का बाड़ा", items: [
+    "बाड़ा साफ, गंदगी हटाई गई",
+    "ताजा बिछावन बिछाया गया",
+    "दाना-पानी भरा और साफ",
+    "तेज बदबू नहीं",
+    "बाड़/गेट मजबूत व बंद",
+  ]},
+  { key: "goatsheep", title: "🐐 बकरी और भेड़ का बाड़ा", items: [
+    "बाड़ा साफ, गोबर हटाया गया",
+    "ताजा चारा और पानी उपलब्ध",
+    "बदबू नहीं",
+    "बाड़/तार सुरक्षित",
+    "जानवर स्वस्थ व शांत दिख रहे",
+  ]},
+  { key: "guineapig", title: "🐹 गिनी पिग और खरगोश बाड़ा", items: [
+    "पिंजरे साफ, बिछावन बदला गया",
+    "पानी की बोतलें/दाना भरा",
+    "पिंजरों से बदबू नहीं",
+    "कुंडी सुरक्षित",
+  ]},
+  { key: "bigpond", title: "🌊 बड़ा तालाब", items: [
+    "पानी का स्तर व स्वच्छता जांची",
+    "कचरा, काई या बदबू नहीं",
+    "सुरक्षा रेलिंग/सीमा बरकरार",
+    "आसपास का क्षेत्र साफ",
+  ]},
+  { key: "cafe", title: "☕ कैफे", items: [
+    "सीटिंग और टेबल साफ",
+    "रसोई साफ, खाने की बदबू नहीं",
+    "बर्तन धुले व स्टॉक में",
+    "मेन्यू आइटम/स्टॉक उपलब्ध",
+    "कूड़ेदान खाली",
+  ]},
+  { key: "washroom", title: "🚻 वॉशरूम", items: [
+    "शौचालय व फर्श साफ-सूखे",
+    "बदबू नहीं, एयर फ्रेशनर लगा",
+    "हैंडवॉश, साबुन, टिश्यू स्टॉक में",
+    "कूड़ेदान खाली",
+    "पानी/फ्लश ठीक से काम कर रहा",
+  ]},
+  { key: "tents", title: "⛺ खुले टेंट और कुशन", items: [
+    "कुशन साफ, सूखे (सीलन की बदबू नहीं)",
+    "टेंट ढांचा/छत मजबूत",
+    "फर्श/मैट साफ",
+    "कोई कीड़े-मकोड़े नहीं",
+  ]},
+  { key: "generator", title: "🔌 जनरेटर और बिजली", items: [
+    "डीजल स्तर जांचा और भरा गया",
+    "टेस्ट-स्टार्ट किया, सुचारू चल रहा",
+    "ईंधन रिसाव/बदबू नहीं",
+    "बैकअप केबल/कनेक्शन जांचे",
+  ]},
+  { key: "garden", title: "🥬 सब्जी बगीचा", items: [
+    "निराई-गुड़ाई हुई, क्यारियां साफ",
+    "पौधों को पानी दिया गया",
+    "रास्ते कचरे से मुक्त",
+    "बगीचे की बाड़ बरकरार",
+  ]},
+  { key: "boundary", title: "🚧 सीमा और चारदीवारी", items: [
+    "पूरी बाड़/चारदीवारी में गैप की जांच",
+    "गेट सुरक्षित व ठीक से काम कर रहे",
+    "आवारा जानवर/अनधिकृत प्रवेश नहीं",
+  ]},
+  { key: "amphitheater", title: "🎭 एम्फीथिएटर", items: [
+    "बैठने का क्षेत्र साफ",
+    "स्टेज/फर्श झाड़ा, कचरा मुक्त",
+    "साउंड/माइक जांचा (यदि उपयोग में)",
+    "बदबू या रुका पानी नहीं",
+  ]},
+  { key: "trampoline", title: "🤸 ट्रैम्पोलिन", items: [
+    "सतह साफ और पोंछी गई",
+    "जाल/पैडिंग बरकरार",
+    "फ्रेम व स्प्रिंग सुरक्षा जांच",
+    "नीचे नुकीली चीज/कचरा नहीं",
+  ]},
+  { key: "painting", title: "🎨 बच्चों का पेंटिंग क्षेत्र", items: [
+    "टेबल/ईज़ल साफ और पोंछे गए",
+    "पेंट, ब्रश, एप्रन स्टॉक व साफ",
+    "पानी के बर्तन भरे, फर्श साफ",
+    "पास में पेंट के दाग नहीं",
+  ]},
+  { key: "final", title: "✅ संपूर्ण फार्म — अंतिम जांच", items: [
+    "वॉकवे/रास्ते साफ और खुले",
+    "पूरी संपत्ति में कहीं भी बदबू नहीं",
+    "सभी कूड़ेदान खाली किए गए",
+    "साइनेज, लाइटिंग व म्यूजिक ठीक से काम कर रहे",
+    "फर्स्ट-एड किट स्टॉक व सुलभ",
+    "स्टाफ यूनिफॉर्म में, ब्रीफ किया गया और तैनात",
+  ]},
+];
+const CHECKLIST_TOTAL_ITEMS = CHECKLIST_SECTIONS.reduce((s, sec) => s + sec.items.length, 0);
+
+// Counts weekend (Sat/Sun) dates in the last ~2 months that have no submitted
+// checklist yet — used to badge the tab so the owner notices at a glance.
+function countMissingWeekendChecklists(checklists) {
+  const submittedDates = new Set(checklists.map((c) => c.date));
+  let count = 0;
+  for (let i = 0; i <= 60; i++) {
+    const d = addDays(new Date(), -i);
+    const day = d.getDay();
+    if (day === 0 || day === 6) {
+      if (!submittedDates.has(toDateStr(d))) count++;
+    }
+  }
+  return count;
+}
+
+function ChecklistModule({ checklists, setChecklists, currentUser }) {
+  const [subTab, setSubTab] = useState("fill");
+  const missing = countMissingWeekendChecklists(checklists);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <ListChecks className="text-[#C9A66B]" size={20} />
+        <h2 className="font-display text-2xl font-600 text-[#16261F]">Checklist</h2>
+      </div>
+      <p className="text-xs font-ui text-[#9C9686] mb-4">अतिथि तैयारी चेकलिस्ट — गेट खोलने से पहले हर दिन इस्तेमाल करें</p>
+
+      <div className="flex gap-1 bg-[#F0EBDD] rounded-full p-1 w-fit mb-5">
+        <button onClick={() => setSubTab("fill")}
+          className={`px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide ${subTab === "fill" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>
+          Fill Checklist
+        </button>
+        <button onClick={() => setSubTab("reports")}
+          className={`relative px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide flex items-center gap-1.5 ${subTab === "reports" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>
+          Reports
+          {missing > 0 && <span className="bg-[#C1694F] text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{missing}</span>}
+        </button>
+      </div>
+
+      {subTab === "fill" ? (
+        <FillChecklist checklists={checklists} setChecklists={setChecklists} currentUser={currentUser} />
+      ) : (
+        <ChecklistReports checklists={checklists} />
+      )}
+    </div>
+  );
+}
+
+function FillChecklist({ checklists, setChecklists, currentUser }) {
+  const [date, setDate] = useState(todayDateStr());
+  const existing = checklists.find((c) => c.date === date);
+  const [checks, setChecks] = useState(existing?.checks || {});
+  const [inspectorName, setInspectorName] = useState(existing?.inspectorName || currentUser.name);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  useEffect(() => {
+    const found = checklists.find((c) => c.date === date);
+    setChecks(found?.checks || {});
+    setInspectorName(found?.inspectorName || currentUser.name);
+    setSavedMsg("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
+
+  const toggle = (key) => setChecks((c) => ({ ...c, [key]: !c[key] }));
+  const checkedCount = Object.values(checks).filter(Boolean).length;
+
+  const submit = () => {
+    const submission = {
+      id: existing?.id || uid(), date, checks, inspectorName: inspectorName.trim() || currentUser.name,
+      submittedBy: currentUser.name, submittedAt: new Date().toISOString(),
+    };
+    setChecklists(existing ? checklists.map((c) => c.id === existing.id ? submission : c) : [...checklists, submission]);
+    setSavedMsg(existing ? "Checklist updated." : "Checklist submitted.");
+    setTimeout(() => setSavedMsg(""), 3000);
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-end gap-3 mb-5">
+        <div>
+          <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium block mb-1">Date</label>
+          <input type="date" value={date} max={todayDateStr()} onChange={(e) => setDate(e.target.value)}
+            className="border border-[#EAE4D3] bg-white rounded-xl px-3 py-2.5 text-sm font-ticket shadow-sm" />
+        </div>
+        <div className="flex-1 min-w-[180px]">
+          <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium block mb-1">जांचकर्ता (Ops Manager)</label>
+          <input value={inspectorName} onChange={(e) => setInspectorName(e.target.value)}
+            className="w-full border border-[#EAE4D3] bg-white rounded-xl px-3 py-2.5 text-sm shadow-sm" />
+        </div>
+        <div className="bg-white rounded-xl px-4 py-2.5 shadow-sm">
+          <span className="font-display text-lg font-600 text-[#16261F]">{checkedCount}/{CHECKLIST_TOTAL_ITEMS}</span>
+          <span className="text-[10px] font-ui text-[#9C9686] uppercase tracking-widest ml-1">complete</span>
+        </div>
+      </div>
+      {existing && (
+        <p className="text-xs font-ui text-[#8a6f42] mb-3 bg-[#C9A66B]/10 border border-[#C9A66B]/30 rounded-xl px-3 py-2">
+          A checklist for this date already exists (submitted by {existing.submittedBy}) — saving will update it, not duplicate it.
+        </p>
+      )}
+
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {CHECKLIST_SECTIONS.map((sec) => {
+          const secChecked = sec.items.filter((_, i) => checks[`${sec.key}-${i}`]).length;
+          return (
+            <div key={sec.key} className="bg-white rounded-2xl shadow-sm p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-ui font-semibold text-sm text-[#16261F]">{sec.title}</div>
+                <span className={`text-[10px] font-ticket ${secChecked === sec.items.length ? "text-[#7C8F5E]" : "text-[#9C9686]"}`}>{secChecked}/{sec.items.length}</span>
+              </div>
+              <div className="space-y-2">
+                {sec.items.map((item, i) => {
+                  const key = `${sec.key}-${i}`;
+                  return (
+                    <label key={key} className="flex items-start gap-2 text-sm cursor-pointer">
+                      <input type="checkbox" checked={!!checks[key]} onChange={() => toggle(key)} className="mt-0.5 w-4 h-4 accent-[#7C8F5E] shrink-0" />
+                      <span className={checks[key] ? "text-[#16261F]" : "text-[#5c5648]"}>{item}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-col items-center mt-6 mb-4 no-print">
+        <button onClick={submit} className="bg-[#16261F] text-white px-8 py-3 rounded-full text-sm font-ui font-semibold uppercase tracking-wide shadow-2xl flex items-center gap-2">
+          <Check size={16} /> {existing ? "Update Checklist" : "Submit Checklist"}
+        </button>
+        {savedMsg && <p className="text-xs font-ui text-[#7C8F5E] mt-2">{savedMsg}</p>}
+      </div>
+    </div>
+  );
+}
+
+function ChecklistReports({ checklists }) {
+  const [viewing, setViewing] = useState(null);
+  const cutoff = addDays(new Date(), -60);
+  const recent = checklists.filter((c) => new Date(c.date) >= cutoff).sort((a, b) => b.date.localeCompare(a.date));
+
+  const missingWeekends = [];
+  for (let i = 0; i <= 60; i++) {
+    const d = addDays(new Date(), -i);
+    const day = d.getDay();
+    if (day === 0 || day === 6) {
+      const key = toDateStr(d);
+      if (!checklists.find((c) => c.date === key)) missingWeekends.push(key);
+    }
+  }
+  missingWeekends.sort((a, b) => b.localeCompare(a));
+
+  return (
+    <div>
+      {missingWeekends.length > 0 && (
+        <div className="bg-[#C1694F]/10 border border-[#C1694F]/30 rounded-2xl p-4 mb-5">
+          <div className="flex items-center gap-2 font-ui font-semibold text-sm text-[#C1694F] mb-2">
+            <AlertTriangle size={16} /> Missing Weekend Checklists ({missingWeekends.length})
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {missingWeekends.map((d) => (
+              <span key={d} className="bg-white text-[#C1694F] border border-[#C1694F]/40 text-xs font-ticket px-3 py-1.5 rounded-full">
+                {new Date(d).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="font-display text-lg font-600 text-[#16261F] mb-3">Submitted Checklists — Last 2 Months</div>
+      <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+        <div className="grid grid-cols-[90px_1fr_70px_60px] gap-2 px-4 py-2.5 bg-[#F0EBDD] text-[9px] font-ui uppercase tracking-widest text-[#5c5648] font-medium">
+          <span>Date</span><span>Inspector</span><span>Complete</span><span></span>
+        </div>
+        <div className="divide-y divide-[#F0EBDD] max-h-[55vh] overflow-y-auto">
+          {recent.length === 0 && <div className="px-4 py-6 text-sm text-[#9C9686] font-ui text-center">No checklists submitted in the last 2 months.</div>}
+          {recent.map((c) => {
+            const checkedCount = Object.values(c.checks).filter(Boolean).length;
+            const isWeekend = [0, 6].includes(new Date(c.date).getDay());
+            return (
+              <button key={c.id} onClick={() => setViewing(c)} className="w-full grid grid-cols-[90px_1fr_70px_60px] gap-2 px-4 py-2.5 items-center text-sm text-left hover:bg-[#FAF8F2]">
+                <span className="font-ticket text-xs text-[#16261F]">
+                  {new Date(c.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                  {isWeekend && <span className="text-[#C9A66B]"> ·wknd</span>}
+                </span>
+                <span className="text-[#16261F] truncate">{c.inspectorName}</span>
+                <span className={`font-ticket text-xs ${checkedCount === CHECKLIST_TOTAL_ITEMS ? "text-[#7C8F5E]" : "text-[#C1694F]"}`}>{checkedCount}/{CHECKLIST_TOTAL_ITEMS}</span>
+                <span className="text-[#8a6f42] text-xs font-ui underline text-right">View</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {viewing && <ChecklistDetailModal submission={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+function ChecklistDetailModal({ submission, onClose }) {
+  return (
+    <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center px-4 py-8" onClick={onClose}>
+      <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 sticky top-0 bg-white border-b border-[#F0EBDD] flex justify-between items-center z-10">
+          <div>
+            <div className="font-display text-xl font-600 text-[#16261F]">
+              {new Date(submission.date).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            </div>
+            <div className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686]">जांचकर्ता: {submission.inspectorName} · Submitted by {submission.submittedBy}</div>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-[#F0EBDD] rounded-full shrink-0"><X size={18} /></button>
+        </div>
+        <div className="p-5 grid sm:grid-cols-2 gap-4">
+          {CHECKLIST_SECTIONS.map((sec) => (
+            <div key={sec.key} className="bg-[#FAF8F2] rounded-2xl p-4">
+              <div className="font-ui font-semibold text-sm text-[#16261F] mb-2">{sec.title}</div>
+              <div className="space-y-1.5">
+                {sec.items.map((item, i) => {
+                  const key = `${sec.key}-${i}`;
+                  const checked = !!submission.checks[key];
+                  return (
+                    <div key={key} className="flex items-start gap-2 text-xs">
+                      {checked ? <Check size={14} className="text-[#7C8F5E] shrink-0 mt-0.5" /> : <X size={14} className="text-[#C1694F] shrink-0 mt-0.5" />}
+                      <span className={checked ? "text-[#16261F]" : "text-[#9C9686]"}>{item}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
