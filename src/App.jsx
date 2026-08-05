@@ -43,7 +43,7 @@ const BRAND = {
 
 // All shared restaurant data lives in one Firestore collection, "restaurant",
 // as four documents: profiles / menu / orders / bills — each holding { data: [...] }.
-const KEYS = { profiles: "profiles", menu: "menu", orders: "orders", bills: "bills", parties: "parties", checklists: "checklists" };
+const KEYS = { profiles: "profiles", menu: "menu", orders: "orders", bills: "bills", parties: "parties", checklists: "checklists", kitchenChecklists: "kitchenChecklists" };
 const COLLECTION = "restaurant";
 
 function docRef(key) {
@@ -171,8 +171,9 @@ export default function App() {
   const [bills, setBills] = useState([]);
   const [parties, setParties] = useState([]);
   const [checklists, setChecklists] = useState([]);
+  const [kitchenChecklists, setKitchenChecklists] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loaded, setLoaded] = useState({ profiles: false, menu: false, orders: false, bills: false, parties: false, checklists: false });
+  const [loaded, setLoaded] = useState({ profiles: false, menu: false, orders: false, bills: false, parties: false, checklists: false, kitchenChecklists: false });
   const [currentUser, setCurrentUser] = useState(null);
   const [syncedAt, setSyncedAt] = useState(null);
   const [globalView, setGlobalView] = useState("home");
@@ -190,6 +191,7 @@ export default function App() {
       subscribe(KEYS.bills, (v) => { setBills(v); markLoaded("bills"); setSyncedAt(new Date()); }),
       subscribe(KEYS.parties, (v) => { setParties(v); markLoaded("parties"); setSyncedAt(new Date()); }),
       subscribe(KEYS.checklists, (v) => { setChecklists(v); markLoaded("checklists"); setSyncedAt(new Date()); }),
+      subscribe(KEYS.kitchenChecklists, (v) => { setKitchenChecklists(v); markLoaded("kitchenChecklists"); setSyncedAt(new Date()); }),
     ];
     return () => unsubs.forEach((u) => u());
   }, []);
@@ -209,7 +211,8 @@ export default function App() {
     orders: (n) => { setOrders(n); persistToFirestore(KEYS.orders, n); },
     bills: (n) => { setBills(n); persistToFirestore(KEYS.bills, n); },
     parties: (n) => { setParties(n); persistToFirestore(KEYS.parties, n); },
-    checklists: (n) => { setChecklists(n); persistToFirestore(KEYS.checklists, n); } };
+    checklists: (n) => { setChecklists(n); persistToFirestore(KEYS.checklists, n); },
+    kitchenChecklists: (n) => { setKitchenChecklists(n); persistToFirestore(KEYS.kitchenChecklists, n); } };
 
   // Every role can take orders like a server, not just server logins. Server
   // accounts always land straight on order-taking (that's their whole job);
@@ -273,10 +276,12 @@ export default function App() {
                   bills={bills} setBills={persist.bills}
                   parties={parties} setParties={persist.parties}
                   checklists={checklists} setChecklists={persist.checklists}
+                  kitchenChecklists={kitchenChecklists} setKitchenChecklists={persist.kitchenChecklists}
                 />
               )}
               {currentUser.role === "chef" && (
-                <ChefDashboard orders={orders} setOrders={persist.orders} menu={menu} setMenu={persist.menu} />
+                <ChefDashboard orders={orders} setOrders={persist.orders} menu={menu} setMenu={persist.menu}
+                  kitchenChecklists={kitchenChecklists} setKitchenChecklists={persist.kitchenChecklists} currentUser={currentUser} />
               )}
             </>
           )}
@@ -1074,7 +1079,7 @@ function AddItemsModal({ order, menu, onClose, onSubmit }) {
 // ---------------------------------------------------------------------------
 // CHEF DASHBOARD
 // ---------------------------------------------------------------------------
-function ChefDashboard({ orders, setOrders, menu, setMenu }) {
+function ChefDashboard({ orders, setOrders, menu, setMenu, kitchenChecklists, setKitchenChecklists, currentUser }) {
   const [tab, setTab] = useState("kitchen");
   const visible = orders.filter(o => !o.billed).sort((a, b) => {
     if (a.urgent !== b.urgent) return a.urgent ? -1 : 1;
@@ -1094,7 +1099,7 @@ function ChefDashboard({ orders, setOrders, menu, setMenu }) {
 
   return (
     <div>
-      <NavTabs tabs={[["kitchen", "Kitchen", ChefHat], ["menu", "Menu", UtensilsCrossed]]} current={tab} onChange={setTab} />
+      <NavTabs tabs={[["kitchen", "Kitchen", ChefHat], ["menu", "Menu", UtensilsCrossed], ["kitchenChecklist", "Kitchen Checklist", ListChecks]]} current={tab} onChange={setTab} />
       {tab === "kitchen" ? (
         <div>
           <div className="flex items-center gap-2 mb-4">
@@ -1121,8 +1126,10 @@ function ChefDashboard({ orders, setOrders, menu, setMenu }) {
             ))}
           </div>
         </div>
-      ) : (
+      ) : tab === "menu" ? (
         <AvailabilityBoard menu={menu} setMenu={setMenu} />
+      ) : (
+        <KitchenChecklistModule checklists={kitchenChecklists} setChecklists={setKitchenChecklists} currentUser={currentUser} />
       )}
     </div>
   );
@@ -1172,10 +1179,13 @@ function AvailabilityBoard({ menu, setMenu }) {
 // ---------------------------------------------------------------------------
 // ADMIN DASHBOARD (owner / manager)
 // ---------------------------------------------------------------------------
-function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, orders, setOrders, bills, setBills, parties, setParties, checklists, setChecklists }) {
+function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, orders, setOrders, bills, setBills, parties, setParties, checklists, setChecklists, kitchenChecklists, setKitchenChecklists }) {
   const missingWeekends = countMissingWeekendChecklists(checklists);
+  const missingKitchenWeekends = countMissingWeekendChecklists(kitchenChecklists);
   const tabsBase = [["dashboard", "Dashboard", LayoutDashboard], ["menu", "Menu", UtensilsCrossed], ["orders", "Orders", Clock], ["billing", "Billing", Receipt], ["history", "Bill History", History], ["parties", "Parties", PartyPopper], ["checklist", "Checklist", ListChecks, missingWeekends]];
-  const tabs = currentUser.role === "owner" ? [...tabsBase, ["staff", "Staff", Users]] : tabsBase;
+  const tabs = currentUser.role === "owner"
+    ? [...tabsBase, ["kitchenChecklist", "Kitchen Checklist", ChefHat, missingKitchenWeekends], ["staff", "Staff", Users]]
+    : tabsBase;
   const [tab, setTab] = useState("dashboard");
 
   return (
@@ -1198,6 +1208,7 @@ function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, ord
         {tab === "history" && <BillHistory bills={bills} parties={parties} />}
         {tab === "parties" && <PartyBookings parties={parties} setParties={setParties} currentUser={currentUser} />}
         {tab === "checklist" && <ChecklistModule checklists={checklists} setChecklists={setChecklists} currentUser={currentUser} />}
+        {tab === "kitchenChecklist" && currentUser.role === "owner" && <KitchenChecklistModule checklists={kitchenChecklists} setChecklists={setKitchenChecklists} currentUser={currentUser} />}
         {tab === "staff" && currentUser.role === "owner" && <StaffManager profiles={profiles} setProfiles={setProfiles} currentUser={currentUser} />}
       </div>
     </div>
@@ -2565,6 +2576,263 @@ function ChecklistDetailModal({ submission, onClose }) {
         </div>
         <div className="p-5 grid sm:grid-cols-2 gap-4">
           {CHECKLIST_SECTIONS.map((sec) => (
+            <div key={sec.key} className="bg-[#FAF8F2] rounded-2xl p-4">
+              <div className="font-ui font-semibold text-sm text-[#16261F] mb-2">{sec.title}</div>
+              <div className="space-y-1.5">
+                {sec.items.map((item, i) => {
+                  const key = `${sec.key}-${i}`;
+                  const checked = !!submission.checks[key];
+                  return (
+                    <div key={key} className="flex items-start gap-2 text-xs">
+                      {checked ? <Check size={14} className="text-[#7C8F5E] shrink-0 mt-0.5" /> : <X size={14} className="text-[#C1694F] shrink-0 mt-0.5" />}
+                      <span className={checked ? "text-[#16261F]" : "text-[#9C9686]"}>{item}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// KITCHEN CHECKLIST — rasoi/store readiness (chef fills, owner reviews)
+// ---------------------------------------------------------------------------
+const KITCHEN_CHECKLIST_SECTIONS = [
+  { key: "beverages", title: "☕ पेय पदार्थ", items: [
+    "चाय", "चाय मसाला", "कॉफी", "ड्रिंकिंग चॉकलेट / कोको पाउडर", "चीनी", "चीनी के सैशे",
+  ]},
+  { key: "softdrinks", title: "🥤 सॉफ्ट ड्रिंक्स और जूस", items: [
+    "कोका-कोला", "डाइट कोक", "स्प्राइट", "फैंटा", "माज़ा", "लेमोनेड",
+  ]},
+  { key: "spices", title: "🧂 मसाले और सीज़निंग", items: [
+    "इलायची", "अदरक", "नमक",
+  ]},
+  { key: "oils", title: "🛢️ तेल और खाना पकाने की आवश्यक सामग्री", items: [
+    "खाना पकाने का तेल", "ऑलिव ऑयल", "घी", "मक्खन", "गेहूं का आटा",
+  ]},
+  { key: "dairy", title: "🥚 डेयरी और अंडे", items: [
+    "अंडे", "चीज़",
+  ]},
+  { key: "bakery", title: "🍞 बेकरी और रेडी-टू-कुक", items: [
+    "ब्रेड", "मैगी", "पैनकेक मिक्स", "पिज़्ज़ा", "मोमोज़", "स्प्रिंग रोल", "फ्रेंच फ्राइज़", "पॉपकॉर्न", "आलू मसाला",
+  ]},
+  { key: "sauces", title: "🥫 सॉस, डिप्स और कॉन्डिमेंट्स", items: [
+    "सॉस", "टोमैटो केचप", "मेयोनेज़", "साल्सा", "डिप", "स्प्रिंग रोल सॉस", "चॉकलेट सॉस",
+  ]},
+  { key: "vegetables", title: "🥒 ताज़ी सब्ज़ियाँ और हरी पत्तियाँ", items: [
+    "खीरा", "गाजर", "टमाटर", "बीन्स", "धनिया",
+  ]},
+  { key: "frozen", title: "🧊 ठंडी / जमी हुई वस्तुएँ", items: [
+    "बर्फ",
+  ]},
+  { key: "equipment", title: "🔌 उपकरणों की जाँच", items: [
+    "माइक्रोवेव काम कर रहा है", "मिक्सर काम कर रहा है", "कॉफी बीटर चार्ज है", "फ्रिज सही से ठंडा कर रहा है", "गैस सिलेंडर बंद है",
+  ]},
+];
+const KITCHEN_CHECKLIST_TOTAL_ITEMS = KITCHEN_CHECKLIST_SECTIONS.reduce((s, sec) => s + sec.items.length, 0);
+
+function KitchenChecklistModule({ checklists, setChecklists, currentUser }) {
+  const [subTab, setSubTab] = useState("fill");
+  const missing = countMissingWeekendChecklists(checklists);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <ChefHat className="text-[#C1694F]" size={20} />
+        <h2 className="font-display text-2xl font-600 text-[#16261F]">Kitchen Checklist</h2>
+      </div>
+      <p className="text-xs font-ui text-[#9C9686] mb-4">रसोई एवं स्टोर चेकलिस्ट — गेट खोलने से पहले हर दिन इस्तेमाल करें</p>
+
+      <div className="flex gap-1 bg-[#F0EBDD] rounded-full p-1 w-fit mb-5">
+        <button onClick={() => setSubTab("fill")}
+          className={`px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide ${subTab === "fill" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>
+          Fill Checklist
+        </button>
+        <button onClick={() => setSubTab("reports")}
+          className={`relative px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide flex items-center gap-1.5 ${subTab === "reports" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>
+          Reports
+          {missing > 0 && <span className="bg-[#C1694F] text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{missing}</span>}
+        </button>
+      </div>
+
+      {subTab === "fill" ? (
+        <FillKitchenChecklist checklists={checklists} setChecklists={setChecklists} currentUser={currentUser} />
+      ) : (
+        <KitchenChecklistReports checklists={checklists} />
+      )}
+    </div>
+  );
+}
+
+function FillKitchenChecklist({ checklists, setChecklists, currentUser }) {
+  const [date, setDate] = useState(todayDateStr());
+  const existing = checklists.find((c) => c.date === date);
+  const [checks, setChecks] = useState(existing?.checks || {});
+  const [inspectorName, setInspectorName] = useState(existing?.inspectorName || currentUser.name);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  useEffect(() => {
+    const found = checklists.find((c) => c.date === date);
+    setChecks(found?.checks || {});
+    setInspectorName(found?.inspectorName || currentUser.name);
+    setSavedMsg("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
+
+  const toggle = (key) => setChecks((c) => ({ ...c, [key]: !c[key] }));
+  const checkedCount = Object.values(checks).filter(Boolean).length;
+
+  const submit = () => {
+    const submission = {
+      id: existing?.id || uid(), date, checks, inspectorName: inspectorName.trim() || currentUser.name,
+      submittedBy: currentUser.name, submittedAt: new Date().toISOString(),
+    };
+    setChecklists(existing ? checklists.map((c) => c.id === existing.id ? submission : c) : [...checklists, submission]);
+    setSavedMsg(existing ? "Checklist updated." : "Checklist submitted.");
+    setTimeout(() => setSavedMsg(""), 3000);
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-end gap-3 mb-5">
+        <div>
+          <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium block mb-1">Date</label>
+          <input type="date" value={date} max={todayDateStr()} onChange={(e) => setDate(e.target.value)}
+            className="border border-[#EAE4D3] bg-white rounded-xl px-3 py-2.5 text-sm font-ticket shadow-sm" />
+        </div>
+        <div className="flex-1 min-w-[180px]">
+          <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium block mb-1">जांचकर्ता (Chef)</label>
+          <input value={inspectorName} onChange={(e) => setInspectorName(e.target.value)}
+            className="w-full border border-[#EAE4D3] bg-white rounded-xl px-3 py-2.5 text-sm shadow-sm" />
+        </div>
+        <div className="bg-white rounded-xl px-4 py-2.5 shadow-sm">
+          <span className="font-display text-lg font-600 text-[#16261F]">{checkedCount}/{KITCHEN_CHECKLIST_TOTAL_ITEMS}</span>
+          <span className="text-[10px] font-ui text-[#9C9686] uppercase tracking-widest ml-1">stocked</span>
+        </div>
+      </div>
+      {existing && (
+        <p className="text-xs font-ui text-[#8a6f42] mb-3 bg-[#C9A66B]/10 border border-[#C9A66B]/30 rounded-xl px-3 py-2">
+          A checklist for this date already exists (submitted by {existing.submittedBy}) — saving will update it, not duplicate it.
+        </p>
+      )}
+
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {KITCHEN_CHECKLIST_SECTIONS.map((sec) => {
+          const secChecked = sec.items.filter((_, i) => checks[`${sec.key}-${i}`]).length;
+          return (
+            <div key={sec.key} className="bg-white rounded-2xl shadow-sm p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-ui font-semibold text-sm text-[#16261F]">{sec.title}</div>
+                <span className={`text-[10px] font-ticket ${secChecked === sec.items.length ? "text-[#7C8F5E]" : "text-[#9C9686]"}`}>{secChecked}/{sec.items.length}</span>
+              </div>
+              <div className="space-y-2">
+                {sec.items.map((item, i) => {
+                  const key = `${sec.key}-${i}`;
+                  return (
+                    <label key={key} className="flex items-start gap-2 text-sm cursor-pointer">
+                      <input type="checkbox" checked={!!checks[key]} onChange={() => toggle(key)} className="mt-0.5 w-4 h-4 accent-[#7C8F5E] shrink-0" />
+                      <span className={checks[key] ? "text-[#16261F]" : "text-[#5c5648]"}>{item}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-col items-center mt-6 mb-4 no-print">
+        <button onClick={submit} className="bg-[#16261F] text-white px-8 py-3 rounded-full text-sm font-ui font-semibold uppercase tracking-wide shadow-2xl flex items-center gap-2">
+          <Check size={16} /> {existing ? "Update Checklist" : "Submit Checklist"}
+        </button>
+        {savedMsg && <p className="text-xs font-ui text-[#7C8F5E] mt-2">{savedMsg}</p>}
+      </div>
+    </div>
+  );
+}
+
+function KitchenChecklistReports({ checklists }) {
+  const [viewing, setViewing] = useState(null);
+  const cutoff = addDays(new Date(), -60);
+  const recent = checklists.filter((c) => new Date(c.date) >= cutoff).sort((a, b) => b.date.localeCompare(a.date));
+
+  const missingWeekends = [];
+  for (let i = 0; i <= 60; i++) {
+    const d = addDays(new Date(), -i);
+    const day = d.getDay();
+    if (day === 0 || day === 6) {
+      const key = toDateStr(d);
+      if (!checklists.find((c) => c.date === key)) missingWeekends.push(key);
+    }
+  }
+  missingWeekends.sort((a, b) => b.localeCompare(a));
+
+  return (
+    <div>
+      {missingWeekends.length > 0 && (
+        <div className="bg-[#C1694F]/10 border border-[#C1694F]/30 rounded-2xl p-4 mb-5">
+          <div className="flex items-center gap-2 font-ui font-semibold text-sm text-[#C1694F] mb-2">
+            <AlertTriangle size={16} /> Missing Weekend Checklists ({missingWeekends.length})
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {missingWeekends.map((d) => (
+              <span key={d} className="bg-white text-[#C1694F] border border-[#C1694F]/40 text-xs font-ticket px-3 py-1.5 rounded-full">
+                {new Date(d).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="font-display text-lg font-600 text-[#16261F] mb-3">Submitted Kitchen Checklists — Last 2 Months</div>
+      <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+        <div className="grid grid-cols-[90px_1fr_70px_60px] gap-2 px-4 py-2.5 bg-[#F0EBDD] text-[9px] font-ui uppercase tracking-widest text-[#5c5648] font-medium">
+          <span>Date</span><span>Inspector</span><span>Stocked</span><span></span>
+        </div>
+        <div className="divide-y divide-[#F0EBDD] max-h-[55vh] overflow-y-auto">
+          {recent.length === 0 && <div className="px-4 py-6 text-sm text-[#9C9686] font-ui text-center">No checklists submitted in the last 2 months.</div>}
+          {recent.map((c) => {
+            const checkedCount = Object.values(c.checks).filter(Boolean).length;
+            const isWeekend = [0, 6].includes(new Date(c.date).getDay());
+            return (
+              <button key={c.id} onClick={() => setViewing(c)} className="w-full grid grid-cols-[90px_1fr_70px_60px] gap-2 px-4 py-2.5 items-center text-sm text-left hover:bg-[#FAF8F2]">
+                <span className="font-ticket text-xs text-[#16261F]">
+                  {new Date(c.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                  {isWeekend && <span className="text-[#C9A66B]"> ·wknd</span>}
+                </span>
+                <span className="text-[#16261F] truncate">{c.inspectorName}</span>
+                <span className={`font-ticket text-xs ${checkedCount === KITCHEN_CHECKLIST_TOTAL_ITEMS ? "text-[#7C8F5E]" : "text-[#C1694F]"}`}>{checkedCount}/{KITCHEN_CHECKLIST_TOTAL_ITEMS}</span>
+                <span className="text-[#8a6f42] text-xs font-ui underline text-right">View</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {viewing && <KitchenChecklistDetailModal submission={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+function KitchenChecklistDetailModal({ submission, onClose }) {
+  return (
+    <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center px-4 py-8" onClick={onClose}>
+      <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 sticky top-0 bg-white border-b border-[#F0EBDD] flex justify-between items-center z-10">
+          <div>
+            <div className="font-display text-xl font-600 text-[#16261F]">
+              {new Date(submission.date).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            </div>
+            <div className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686]">जांचकर्ता: {submission.inspectorName} · Submitted by {submission.submittedBy}</div>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-[#F0EBDD] rounded-full shrink-0"><X size={18} /></button>
+        </div>
+        <div className="p-5 grid sm:grid-cols-2 gap-4">
+          {KITCHEN_CHECKLIST_SECTIONS.map((sec) => (
             <div key={sec.key} className="bg-[#FAF8F2] rounded-2xl p-4">
               <div className="font-ui font-semibold text-sm text-[#16261F] mb-2">{sec.title}</div>
               <div className="space-y-1.5">
