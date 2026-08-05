@@ -2684,7 +2684,8 @@ function FillKitchenChecklist({ checklists, setChecklists, currentUser }) {
   }, [date]);
 
   const toggle = (key) => setChecks((c) => ({ ...c, [key]: !c[key] }));
-  const checkedCount = Object.values(checks).filter(Boolean).length;
+  const checkedCount = KITCHEN_CHECKLIST_SECTIONS.reduce((s, sec) => s + sec.items.filter((_, i) => checks[`${sec.key}-${i}`]).length, 0);
+  const khatamCount = KITCHEN_CHECKLIST_SECTIONS.reduce((s, sec) => s + sec.items.filter((_, i) => checks[`${sec.key}-${i}-khatam`]).length, 0);
 
   const submit = () => {
     const submission = {
@@ -2713,6 +2714,12 @@ function FillKitchenChecklist({ checklists, setChecklists, currentUser }) {
           <span className="font-display text-lg font-600 text-[#16261F]">{checkedCount}/{KITCHEN_CHECKLIST_TOTAL_ITEMS}</span>
           <span className="text-[10px] font-ui text-[#9C9686] uppercase tracking-widest ml-1">stocked</span>
         </div>
+        {khatamCount > 0 && (
+          <div className="bg-[#C1694F]/10 border border-[#C1694F]/30 rounded-xl px-4 py-2.5">
+            <span className="font-display text-lg font-600 text-[#C1694F]">{khatamCount}</span>
+            <span className="text-[10px] font-ui text-[#C1694F] uppercase tracking-widest ml-1">खत्म</span>
+          </div>
+        )}
       </div>
       {existing && (
         <p className="text-xs font-ui text-[#8a6f42] mb-3 bg-[#C9A66B]/10 border border-[#C9A66B]/30 rounded-xl px-3 py-2">
@@ -2723,20 +2730,32 @@ function FillKitchenChecklist({ checklists, setChecklists, currentUser }) {
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {KITCHEN_CHECKLIST_SECTIONS.map((sec) => {
           const secChecked = sec.items.filter((_, i) => checks[`${sec.key}-${i}`]).length;
+          const secKhatam = sec.items.filter((_, i) => checks[`${sec.key}-${i}-khatam`]).length;
           return (
             <div key={sec.key} className="bg-white rounded-2xl shadow-sm p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="font-ui font-semibold text-sm text-[#16261F]">{sec.title}</div>
-                <span className={`text-[10px] font-ticket ${secChecked === sec.items.length ? "text-[#7C8F5E]" : "text-[#9C9686]"}`}>{secChecked}/{sec.items.length}</span>
+                <div className="flex items-center gap-2">
+                  {secKhatam > 0 && <span className="text-[10px] font-ticket text-[#C1694F]">{secKhatam} खत्म</span>}
+                  <span className={`text-[10px] font-ticket ${secChecked === sec.items.length ? "text-[#7C8F5E]" : "text-[#9C9686]"}`}>{secChecked}/{sec.items.length}</span>
+                </div>
               </div>
               <div className="space-y-2">
                 {sec.items.map((item, i) => {
                   const key = `${sec.key}-${i}`;
+                  const khatamKey = `${sec.key}-${i}-khatam`;
+                  const isKhatam = !!checks[khatamKey];
                   return (
-                    <label key={key} className="flex items-start gap-2 text-sm cursor-pointer">
-                      <input type="checkbox" checked={!!checks[key]} onChange={() => toggle(key)} className="mt-0.5 w-4 h-4 accent-[#7C8F5E] shrink-0" />
-                      <span className={checks[key] ? "text-[#16261F]" : "text-[#5c5648]"}>{item}</span>
-                    </label>
+                    <div key={key} className="flex items-center justify-between gap-2 text-sm">
+                      <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                        <input type="checkbox" checked={!!checks[key]} onChange={() => toggle(key)} className="w-4 h-4 accent-[#7C8F5E] shrink-0" />
+                        <span className={`truncate ${isKhatam ? "text-[#C1694F] line-through" : checks[key] ? "text-[#16261F]" : "text-[#5c5648]"}`}>{item}</span>
+                      </label>
+                      <label className="flex items-center gap-1 shrink-0 cursor-pointer" title="खत्म — स्टॉक में नहीं है">
+                        <input type="checkbox" checked={isKhatam} onChange={() => toggle(khatamKey)} className="w-4 h-4 accent-[#C1694F] shrink-0" />
+                        <span className="text-[10px] font-ui font-medium text-[#C1694F] uppercase">खत्म</span>
+                      </label>
+                    </div>
                   );
                 })}
               </div>
@@ -2790,22 +2809,24 @@ function KitchenChecklistReports({ checklists }) {
 
       <div className="font-display text-lg font-600 text-[#16261F] mb-3">Submitted Kitchen Checklists — Last 2 Months</div>
       <div className="bg-white rounded-2xl shadow-md overflow-hidden">
-        <div className="grid grid-cols-[90px_1fr_70px_60px] gap-2 px-4 py-2.5 bg-[#F0EBDD] text-[9px] font-ui uppercase tracking-widest text-[#5c5648] font-medium">
-          <span>Date</span><span>Inspector</span><span>Stocked</span><span></span>
+        <div className="grid grid-cols-[90px_1fr_60px_60px_50px] gap-2 px-4 py-2.5 bg-[#F0EBDD] text-[9px] font-ui uppercase tracking-widest text-[#5c5648] font-medium">
+          <span>Date</span><span>Inspector</span><span>Stocked</span><span>खत्म</span><span></span>
         </div>
         <div className="divide-y divide-[#F0EBDD] max-h-[55vh] overflow-y-auto">
           {recent.length === 0 && <div className="px-4 py-6 text-sm text-[#9C9686] font-ui text-center">No checklists submitted in the last 2 months.</div>}
           {recent.map((c) => {
-            const checkedCount = Object.values(c.checks).filter(Boolean).length;
+            const checkedCount = Object.entries(c.checks).filter(([k, v]) => v && !k.endsWith("-khatam")).length;
+            const khatamCount = Object.entries(c.checks).filter(([k, v]) => v && k.endsWith("-khatam")).length;
             const isWeekend = [0, 6].includes(new Date(c.date).getDay());
             return (
-              <button key={c.id} onClick={() => setViewing(c)} className="w-full grid grid-cols-[90px_1fr_70px_60px] gap-2 px-4 py-2.5 items-center text-sm text-left hover:bg-[#FAF8F2]">
+              <button key={c.id} onClick={() => setViewing(c)} className="w-full grid grid-cols-[90px_1fr_60px_60px_50px] gap-2 px-4 py-2.5 items-center text-sm text-left hover:bg-[#FAF8F2]">
                 <span className="font-ticket text-xs text-[#16261F]">
                   {new Date(c.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                   {isWeekend && <span className="text-[#C9A66B]"> ·wknd</span>}
                 </span>
                 <span className="text-[#16261F] truncate">{c.inspectorName}</span>
-                <span className={`font-ticket text-xs ${checkedCount === KITCHEN_CHECKLIST_TOTAL_ITEMS ? "text-[#7C8F5E]" : "text-[#C1694F]"}`}>{checkedCount}/{KITCHEN_CHECKLIST_TOTAL_ITEMS}</span>
+                <span className={`font-ticket text-xs ${checkedCount === KITCHEN_CHECKLIST_TOTAL_ITEMS ? "text-[#7C8F5E]" : "text-[#9C9686]"}`}>{checkedCount}/{KITCHEN_CHECKLIST_TOTAL_ITEMS}</span>
+                <span className={`font-ticket text-xs ${khatamCount > 0 ? "text-[#C1694F] font-semibold" : "text-[#9C9686]"}`}>{khatamCount || "—"}</span>
                 <span className="text-[#8a6f42] text-xs font-ui underline text-right">View</span>
               </button>
             );
@@ -2839,10 +2860,12 @@ function KitchenChecklistDetailModal({ submission, onClose }) {
                 {sec.items.map((item, i) => {
                   const key = `${sec.key}-${i}`;
                   const checked = !!submission.checks[key];
+                  const isKhatam = !!submission.checks[`${sec.key}-${i}-khatam`];
                   return (
                     <div key={key} className="flex items-start gap-2 text-xs">
                       {checked ? <Check size={14} className="text-[#7C8F5E] shrink-0 mt-0.5" /> : <X size={14} className="text-[#C1694F] shrink-0 mt-0.5" />}
-                      <span className={checked ? "text-[#16261F]" : "text-[#9C9686]"}>{item}</span>
+                      <span className={isKhatam ? "text-[#C1694F] line-through" : checked ? "text-[#16261F]" : "text-[#9C9686]"}>{item}</span>
+                      {isKhatam && <span className="text-[9px] font-ui font-semibold text-[#C1694F] bg-[#C1694F]/10 px-1.5 py-0.5 rounded-full shrink-0">खत्म</span>}
                     </div>
                   );
                 })}
