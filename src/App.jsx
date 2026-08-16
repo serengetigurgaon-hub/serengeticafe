@@ -2605,7 +2605,7 @@ const KITCHEN_CHECKLIST_SECTIONS = [
   { key: "beverages", title: "☕ पेय पदार्थ", items: [
     "चाय", "चाय मसाला", "कॉफी", "ड्रिंकिंग चॉकलेट / कोको पाउडर", "चीनी", "चीनी के सैशे",
   ]},
-  { key: "softdrinks", title: "🥤 सॉफ्ट ड्रिंक्स और जूस", items: [
+  { key: "softdrinks", title: "🥤 सॉफ्ट ड्रिंक्स और जूस", hasQty: true, items: [
     "कोका-कोला", "डाइट कोक", "स्प्राइट", "फैंटा", "माज़ा", "लेमोनेड",
   ]},
   { key: "spices", title: "🧂 मसाले और सीज़निंग", items: [
@@ -2629,11 +2629,47 @@ const KITCHEN_CHECKLIST_SECTIONS = [
   { key: "frozen", title: "🧊 ठंडी / जमी हुई वस्तुएँ", items: [
     "बर्फ",
   ]},
-  { key: "equipment", title: "🔌 उपकरणों की जाँच", items: [
+  { key: "equipment", title: "🔌 उपकरणों की जाँच", extraChecks: [
+      { key: "working", label: "चल रहे हैं", positive: true },
+      { key: "kharab", label: "खराब हैं", positive: false },
+    ], items: [
     "माइक्रोवेव काम कर रहा है", "मिक्सर काम कर रहा है", "कॉफी बीटर चार्ज है", "फ्रिज सही से ठंडा कर रहा है", "गैस सिलेंडर बंद है",
   ]},
 ];
 const KITCHEN_CHECKLIST_TOTAL_ITEMS = KITCHEN_CHECKLIST_SECTIONS.reduce((s, sec) => s + sec.items.length, 0);
+const KITCHEN_DEFAULT_EXTRA_CHECKS = [{ key: "khatam", label: "खत्म", positive: false }];
+
+// Every section gets one or more extra checkboxes per item, beyond the base
+// one — खत्म by default, or a section-specific override like equipment's
+// चल रहे हैं / खराब हैं pair.
+function getExtraChecks(sec) {
+  return sec.extraChecks || KITCHEN_DEFAULT_EXTRA_CHECKS;
+}
+
+// Precise key helpers — since each item can carry a base checkbox, one or
+// more extra checkboxes, and an optional qty text value all sharing the same
+// `checks` object, counting must target exact keys rather than guessing
+// from suffixes (a typed qty value must never be counted as "checked").
+function kitchenBaseKeys() {
+  const keys = [];
+  KITCHEN_CHECKLIST_SECTIONS.forEach((sec) => sec.items.forEach((_, i) => keys.push(`${sec.key}-${i}`)));
+  return keys;
+}
+function kitchenExtraEntries() {
+  const entries = [];
+  KITCHEN_CHECKLIST_SECTIONS.forEach((sec) => {
+    const extras = getExtraChecks(sec);
+    sec.items.forEach((_, i) => {
+      extras.forEach((ex) => {
+        entries.push({ fullKey: `${sec.key}-${i}-${ex.key}`, label: ex.label, positive: !!ex.positive });
+      });
+    });
+  });
+  return entries;
+}
+function kitchenNegativeKeys() {
+  return kitchenExtraEntries().filter((e) => !e.positive).map((e) => e.fullKey);
+}
 
 function KitchenChecklistModule({ checklists, setChecklists, currentUser }) {
   const [subTab, setSubTab] = useState("fill");
@@ -2684,8 +2720,11 @@ function FillKitchenChecklist({ checklists, setChecklists, currentUser }) {
   }, [date]);
 
   const toggle = (key) => setChecks((c) => ({ ...c, [key]: !c[key] }));
-  const checkedCount = KITCHEN_CHECKLIST_SECTIONS.reduce((s, sec) => s + sec.items.filter((_, i) => checks[`${sec.key}-${i}`]).length, 0);
-  const khatamCount = KITCHEN_CHECKLIST_SECTIONS.reduce((s, sec) => s + sec.items.filter((_, i) => checks[`${sec.key}-${i}-khatam`]).length, 0);
+  const setQty = (key, val) => setChecks((c) => ({ ...c, [key]: val }));
+  const baseKeys = kitchenBaseKeys();
+  const negativeKeys = kitchenNegativeKeys();
+  const checkedCount = baseKeys.filter((k) => checks[k]).length;
+  const flaggedCount = negativeKeys.filter((k) => checks[k]).length;
 
   const submit = () => {
     const submission = {
@@ -2714,10 +2753,10 @@ function FillKitchenChecklist({ checklists, setChecklists, currentUser }) {
           <span className="font-display text-lg font-600 text-[#16261F]">{checkedCount}/{KITCHEN_CHECKLIST_TOTAL_ITEMS}</span>
           <span className="text-[10px] font-ui text-[#9C9686] uppercase tracking-widest ml-1">stocked</span>
         </div>
-        {khatamCount > 0 && (
+        {flaggedCount > 0 && (
           <div className="bg-[#C1694F]/10 border border-[#C1694F]/30 rounded-xl px-4 py-2.5">
-            <span className="font-display text-lg font-600 text-[#C1694F]">{khatamCount}</span>
-            <span className="text-[10px] font-ui text-[#C1694F] uppercase tracking-widest ml-1">खत्म</span>
+            <span className="font-display text-lg font-600 text-[#C1694F]">{flaggedCount}</span>
+            <span className="text-[10px] font-ui text-[#C1694F] uppercase tracking-widest ml-1">flagged</span>
           </div>
         )}
       </div>
@@ -2729,32 +2768,49 @@ function FillKitchenChecklist({ checklists, setChecklists, currentUser }) {
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {KITCHEN_CHECKLIST_SECTIONS.map((sec) => {
+          const extras = getExtraChecks(sec);
           const secChecked = sec.items.filter((_, i) => checks[`${sec.key}-${i}`]).length;
-          const secKhatam = sec.items.filter((_, i) => checks[`${sec.key}-${i}-khatam`]).length;
           return (
             <div key={sec.key} className="bg-white rounded-2xl shadow-sm p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="font-ui font-semibold text-sm text-[#16261F]">{sec.title}</div>
-                <div className="flex items-center gap-2">
-                  {secKhatam > 0 && <span className="text-[10px] font-ticket text-[#C1694F]">{secKhatam} खत्म</span>}
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {extras.map((ex) => {
+                    const count = sec.items.filter((_, i) => checks[`${sec.key}-${i}-${ex.key}`]).length;
+                    if (count === 0) return null;
+                    const color = ex.positive ? "#7C8F5E" : "#C1694F";
+                    return <span key={ex.key} className="text-[10px] font-ticket" style={{ color }}>{count} {ex.label}</span>;
+                  })}
                   <span className={`text-[10px] font-ticket ${secChecked === sec.items.length ? "text-[#7C8F5E]" : "text-[#9C9686]"}`}>{secChecked}/{sec.items.length}</span>
                 </div>
               </div>
               <div className="space-y-2">
                 {sec.items.map((item, i) => {
                   const key = `${sec.key}-${i}`;
-                  const khatamKey = `${sec.key}-${i}-khatam`;
-                  const isKhatam = !!checks[khatamKey];
+                  const qtyKey = `${sec.key}-${i}-qty`;
+                  const anyNegativeChecked = extras.some((ex) => !ex.positive && checks[`${sec.key}-${i}-${ex.key}`]);
                   return (
-                    <div key={key} className="flex items-center justify-between gap-2 text-sm">
-                      <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                    <div key={key} className="flex items-center justify-between gap-2 text-sm flex-wrap">
+                      <label className="flex items-center gap-2 flex-1 min-w-[120px] cursor-pointer">
                         <input type="checkbox" checked={!!checks[key]} onChange={() => toggle(key)} className="w-4 h-4 accent-[#7C8F5E] shrink-0" />
-                        <span className={`truncate ${isKhatam ? "text-[#C1694F] line-through" : checks[key] ? "text-[#16261F]" : "text-[#5c5648]"}`}>{item}</span>
+                        <span className={`truncate ${anyNegativeChecked ? "text-[#C1694F] line-through" : checks[key] ? "text-[#16261F]" : "text-[#5c5648]"}`}>{item}</span>
                       </label>
-                      <label className="flex items-center gap-1 shrink-0 cursor-pointer" title="खत्म — स्टॉक में नहीं है">
-                        <input type="checkbox" checked={isKhatam} onChange={() => toggle(khatamKey)} className="w-4 h-4 accent-[#C1694F] shrink-0" />
-                        <span className="text-[10px] font-ui font-medium text-[#C1694F] uppercase">खत्म</span>
-                      </label>
+                      {sec.hasQty && (
+                        <input type="text" inputMode="numeric" value={checks[qtyKey] || ""} onChange={(e) => setQty(qtyKey, e.target.value)}
+                          placeholder="qty" className="w-14 border border-[#EAE4D3] rounded-lg px-2 py-1 text-xs font-ticket text-center shrink-0" />
+                      )}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {extras.map((ex) => {
+                          const exKey = `${sec.key}-${i}-${ex.key}`;
+                          const color = ex.positive ? "#7C8F5E" : "#C1694F";
+                          return (
+                            <label key={ex.key} className="flex items-center gap-1 cursor-pointer" title={ex.label}>
+                              <input type="checkbox" checked={!!checks[exKey]} onChange={() => toggle(exKey)} className="w-4 h-4 shrink-0" style={{ accentColor: color }} />
+                              <span className="text-[10px] font-ui font-medium uppercase" style={{ color }}>{ex.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 })}
@@ -2810,13 +2866,15 @@ function KitchenChecklistReports({ checklists }) {
       <div className="font-display text-lg font-600 text-[#16261F] mb-3">Submitted Kitchen Checklists — Last 2 Months</div>
       <div className="bg-white rounded-2xl shadow-md overflow-hidden">
         <div className="grid grid-cols-[90px_1fr_60px_60px_50px] gap-2 px-4 py-2.5 bg-[#F0EBDD] text-[9px] font-ui uppercase tracking-widest text-[#5c5648] font-medium">
-          <span>Date</span><span>Inspector</span><span>Stocked</span><span>खत्म</span><span></span>
+          <span>Date</span><span>Inspector</span><span>Stocked</span><span>Flagged</span><span></span>
         </div>
         <div className="divide-y divide-[#F0EBDD] max-h-[55vh] overflow-y-auto">
           {recent.length === 0 && <div className="px-4 py-6 text-sm text-[#9C9686] font-ui text-center">No checklists submitted in the last 2 months.</div>}
           {recent.map((c) => {
-            const checkedCount = Object.entries(c.checks).filter(([k, v]) => v && !k.endsWith("-khatam")).length;
-            const khatamCount = Object.entries(c.checks).filter(([k, v]) => v && k.endsWith("-khatam")).length;
+            const baseKeys = kitchenBaseKeys();
+            const negativeKeys = kitchenNegativeKeys();
+            const checkedCount = baseKeys.filter((k) => c.checks[k]).length;
+            const khatamCount = negativeKeys.filter((k) => c.checks[k]).length;
             const isWeekend = [0, 6].includes(new Date(c.date).getDay());
             return (
               <button key={c.id} onClick={() => setViewing(c)} className="w-full grid grid-cols-[90px_1fr_60px_60px_50px] gap-2 px-4 py-2.5 items-center text-sm text-left hover:bg-[#FAF8F2]">
@@ -2853,25 +2911,36 @@ function KitchenChecklistDetailModal({ submission, onClose }) {
           <button onClick={onClose} className="p-1 hover:bg-[#F0EBDD] rounded-full shrink-0"><X size={18} /></button>
         </div>
         <div className="p-5 grid sm:grid-cols-2 gap-4">
-          {KITCHEN_CHECKLIST_SECTIONS.map((sec) => (
-            <div key={sec.key} className="bg-[#FAF8F2] rounded-2xl p-4">
-              <div className="font-ui font-semibold text-sm text-[#16261F] mb-2">{sec.title}</div>
-              <div className="space-y-1.5">
-                {sec.items.map((item, i) => {
-                  const key = `${sec.key}-${i}`;
-                  const checked = !!submission.checks[key];
-                  const isKhatam = !!submission.checks[`${sec.key}-${i}-khatam`];
-                  return (
-                    <div key={key} className="flex items-start gap-2 text-xs">
-                      {checked ? <Check size={14} className="text-[#7C8F5E] shrink-0 mt-0.5" /> : <X size={14} className="text-[#C1694F] shrink-0 mt-0.5" />}
-                      <span className={isKhatam ? "text-[#C1694F] line-through" : checked ? "text-[#16261F]" : "text-[#9C9686]"}>{item}</span>
-                      {isKhatam && <span className="text-[9px] font-ui font-semibold text-[#C1694F] bg-[#C1694F]/10 px-1.5 py-0.5 rounded-full shrink-0">खत्म</span>}
-                    </div>
-                  );
-                })}
+          {KITCHEN_CHECKLIST_SECTIONS.map((sec) => {
+            const extras = getExtraChecks(sec);
+            return (
+              <div key={sec.key} className="bg-[#FAF8F2] rounded-2xl p-4">
+                <div className="font-ui font-semibold text-sm text-[#16261F] mb-2">{sec.title}</div>
+                <div className="space-y-1.5">
+                  {sec.items.map((item, i) => {
+                    const key = `${sec.key}-${i}`;
+                    const checked = !!submission.checks[key];
+                    const qty = submission.checks[`${sec.key}-${i}-qty`];
+                    const activeExtras = extras.filter((ex) => !!submission.checks[`${sec.key}-${i}-${ex.key}`]);
+                    const strike = activeExtras.some((ex) => !ex.positive);
+                    return (
+                      <div key={key} className="flex items-start gap-2 text-xs flex-wrap">
+                        {checked ? <Check size={14} className="text-[#7C8F5E] shrink-0 mt-0.5" /> : <X size={14} className="text-[#C1694F] shrink-0 mt-0.5" />}
+                        <span className={strike ? "text-[#C1694F] line-through" : checked ? "text-[#16261F]" : "text-[#9C9686]"}>{item}</span>
+                        {qty && <span className="text-[9px] font-ticket text-[#8a6f42] bg-[#C9A66B]/10 px-1.5 py-0.5 rounded-full shrink-0">qty: {qty}</span>}
+                        {activeExtras.map((ex) => (
+                          <span key={ex.key} className="text-[9px] font-ui font-semibold px-1.5 py-0.5 rounded-full shrink-0"
+                            style={{ color: ex.positive ? "#7C8F5E" : "#C1694F", backgroundColor: ex.positive ? "#7C8F5E1A" : "#C1694F1A" }}>
+                            {ex.label}
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
