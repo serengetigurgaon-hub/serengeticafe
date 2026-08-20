@@ -1849,13 +1849,20 @@ function PartyBookings({ parties, setParties, currentUser }) {
   const [anchor, setAnchor] = useState(new Date());
   const [formOpen, setFormOpen] = useState(false);
   const [prefill, setPrefill] = useState(null);
+  const [editingBooking, setEditingBooking] = useState(null);
   const [billFor, setBillFor] = useState(null);
 
-  const openBookingForm = (dateStr, slotId) => { setPrefill({ date: dateStr, slot: slotId }); setFormOpen(true); };
+  const openBookingForm = (dateStr, slotId) => { setPrefill({ date: dateStr, slot: slotId }); setEditingBooking(null); setFormOpen(true); };
+  const openEditForm = (booking) => { setEditingBooking(booking); setPrefill(null); setBillFor(null); setFormOpen(true); };
 
-  const addBooking = (booking) => {
-    setParties([...parties, { id: uid(), ...booking, billed: false, createdBy: currentUser.name, createdAt: new Date().toISOString() }]);
+  const saveBooking = (booking) => {
+    if (editingBooking) {
+      setParties(parties.map((p) => p.id === editingBooking.id ? { ...editingBooking, ...booking } : p));
+    } else {
+      setParties([...parties, { id: uid(), ...booking, billed: false, createdBy: currentUser.name, createdAt: new Date().toISOString() }]);
+    }
     setFormOpen(false);
+    setEditingBooking(null);
   };
   const removeBooking = (id) => setParties(parties.filter((p) => p.id !== id));
   const markBilled = (booking, total) => {
@@ -1868,7 +1875,7 @@ function PartyBookings({ parties, setParties, currentUser }) {
     <div>
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
         <div className="font-display text-2xl font-600 text-[#16261F] flex items-center gap-2"><PartyPopper size={20} /> Birthday Parties</div>
-        <button onClick={() => { setPrefill(null); setFormOpen(true); }}
+        <button onClick={() => { setPrefill(null); setEditingBooking(null); setFormOpen(true); }}
           className="bg-[#16261F] text-white px-4 py-2 rounded-full text-xs font-ui font-semibold uppercase tracking-wide flex items-center gap-2 shadow-lg">
           <Plus size={14} /> New Booking
         </button>
@@ -1893,10 +1900,11 @@ function PartyBookings({ parties, setParties, currentUser }) {
       )}
 
       {formOpen && (
-        <PartyBookingForm prefill={prefill} onClose={() => setFormOpen(false)} onSave={addBooking} bookingFor={bookingFor} />
+        <PartyBookingForm prefill={prefill} editingBooking={editingBooking} onClose={() => { setFormOpen(false); setEditingBooking(null); }} onSave={saveBooking} bookingFor={bookingFor} />
       )}
       {billFor && (
-        <PartyBillModal booking={billFor} onClose={() => setBillFor(null)} onBilled={(total) => { markBilled(billFor, total); setBillFor(null); }} onDelete={() => { removeBooking(billFor.id); setBillFor(null); }} />
+        <PartyBillModal booking={billFor} onClose={() => setBillFor(null)} onBilled={(total) => { markBilled(billFor, total); setBillFor(null); }}
+          onDelete={() => { removeBooking(billFor.id); setBillFor(null); }} onEdit={() => openEditForm(billFor)} />
       )}
     </div>
   );
@@ -2029,11 +2037,20 @@ function MonthView({ anchor, parties, onSelectDay, onSelectBooking, onBookSlot }
   );
 }
 
-function PartyBookingForm({ prefill, onClose, onSave, bookingFor }) {
+function PartyBookingForm({ prefill, editingBooking, onClose, onSave, bookingFor }) {
+  const isLegacyBooking = editingBooking && editingBooking.kidUnitPrice === undefined;
   const [form, setForm] = useState({
-    date: prefill?.date || todayDateStr(), slot: prefill?.slot || PARTY_SLOTS[0].id,
-    customerName: "", customerPhone: "", kids: "", adults: "",
-    package: "standard", kidUnitPrice: "", adultUnitPrice: "", addOns: [], addOnForm: { name: "", price: "" },
+    date: editingBooking?.date || prefill?.date || todayDateStr(),
+    slot: editingBooking?.slot || prefill?.slot || PARTY_SLOTS[0].id,
+    customerName: editingBooking?.customerName || "",
+    customerPhone: editingBooking?.customerPhone || "",
+    kids: editingBooking?.kids?.toString() || "",
+    adults: editingBooking?.adults?.toString() || "",
+    package: editingBooking?.package || "standard",
+    kidUnitPrice: editingBooking && !isLegacyBooking ? editingBooking.kidUnitPrice.toString() : "",
+    adultUnitPrice: editingBooking && !isLegacyBooking ? editingBooking.adultUnitPrice.toString() : "",
+    addOns: editingBooking?.addOns || [],
+    addOnForm: { name: "", price: "" },
   });
   const [error, setError] = useState("");
 
@@ -2043,7 +2060,9 @@ function PartyBookingForm({ prefill, onClose, onSave, bookingFor }) {
   };
   const removeAddOn = (id) => setForm({ ...form, addOns: form.addOns.filter((a) => a.id !== id) });
 
-  const conflict = bookingFor(form.date, form.slot);
+  // When editing, the booking's own slot shouldn't count as a conflict with itself.
+  const conflictRaw = bookingFor(form.date, form.slot);
+  const conflict = conflictRaw && conflictRaw.id !== editingBooking?.id ? conflictRaw : null;
 
   const kids = parseInt(form.kids) || 0;
   const adults = parseInt(form.adults) || 0;
@@ -2073,9 +2092,21 @@ function PartyBookingForm({ prefill, onClose, onSave, bookingFor }) {
     <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center px-4 py-8" onClick={onClose}>
       <div className="bg-white rounded-3xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
-          <p className="font-display text-xl font-600 text-[#16261F] flex items-center gap-2"><Cake size={18} /> New Birthday Booking</p>
+          <p className="font-display text-xl font-600 text-[#16261F] flex items-center gap-2">
+            <Cake size={18} /> {editingBooking ? "Edit Birthday Booking" : "New Birthday Booking"}
+          </p>
           <button onClick={onClose} className="p-1 hover:bg-[#F0EBDD] rounded-full"><X size={18} /></button>
         </div>
+        {editingBooking?.billed && (
+          <p className="text-xs font-ui text-[#8a6f42] mb-3 bg-[#C9A66B]/10 border border-[#C9A66B]/30 rounded-xl px-3 py-2">
+            This party has already been billed — changes here won't update a receipt you already printed or sent.
+          </p>
+        )}
+        {isLegacyBooking && (
+          <p className="text-xs font-ui text-[#C1694F] mb-3 bg-[#C1694F]/10 border border-[#C1694F]/30 rounded-xl px-3 py-2">
+            This booking was made before per-head pricing existed — please re-enter the price per kid and per adult below.
+          </p>
+        )}
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -2158,7 +2189,7 @@ function PartyBookingForm({ prefill, onClose, onSave, bookingFor }) {
             <span className="text-[#8a6f42]">{money(grandTotal)}</span>
           </div>
           <button type="submit" className="w-full bg-[#16261F] text-white py-3 rounded-full text-sm font-ui font-semibold uppercase tracking-wide shadow-lg flex items-center justify-center gap-2">
-            <PartyPopper size={16} /> Confirm Booking
+            <PartyPopper size={16} /> {editingBooking ? "Save Changes" : "Confirm Booking"}
           </button>
         </form>
       </div>
@@ -2166,7 +2197,7 @@ function PartyBookingForm({ prefill, onClose, onSave, bookingFor }) {
   );
 }
 
-function PartyBillModal({ booking, onClose, onBilled, onDelete }) {
+function PartyBillModal({ booking, onClose, onBilled, onDelete, onEdit }) {
   const receiptRef = useRef(null);
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState("");
@@ -2245,6 +2276,9 @@ function PartyBillModal({ booking, onClose, onBilled, onDelete }) {
         </div>
         {sendMsg && <p className="text-xs font-ui text-white/90 mt-2 text-center">{sendMsg}</p>}
         <div className="flex gap-2 mt-2">
+          <button onClick={onEdit} className="flex-1 bg-[#F0EBDD] text-[#8a6f42] py-2.5 rounded-full text-xs font-ui font-semibold uppercase flex items-center justify-center gap-1.5">
+            <Pencil size={13} /> Edit
+          </button>
           {!booking.billed && <button onClick={() => onBilled(booking.total)} className="flex-1 bg-[#7C8F5E] text-white py-2.5 rounded-full text-xs font-ui font-semibold uppercase">Mark as Billed</button>}
           <button onClick={onDelete} className="flex-1 bg-[#F0EBDD] text-[#C1694F] py-2.5 rounded-full text-xs font-ui font-semibold uppercase">Cancel Booking</button>
           <button onClick={onClose} className="flex-1 bg-[#F0EBDD] text-[#16261F] py-2.5 rounded-full text-xs font-ui font-semibold uppercase">Close</button>
