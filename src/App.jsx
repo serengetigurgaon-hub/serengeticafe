@@ -5,7 +5,7 @@ import {
   Search, ClipboardList, ShieldCheck, CircleDot, ImagePlus, Loader2, Leaf,
   ShoppingBag, Home, LayoutDashboard, TrendingUp, Utensils, MessageCircle,
   Bell, Volume2, PartyPopper, ChevronLeft, ChevronRight, History, Cake, Baby,
-  ListChecks, AlertTriangle
+  ListChecks, AlertTriangle, Package, Wrench
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from "recharts";
 import html2canvas from "html2canvas";
@@ -43,7 +43,7 @@ const BRAND = {
 
 // All shared restaurant data lives in one Firestore collection, "restaurant",
 // as four documents: profiles / menu / orders / bills — each holding { data: [...] }.
-const KEYS = { profiles: "profiles", menu: "menu", orders: "orders", bills: "bills", parties: "parties", checklists: "checklists", kitchenChecklists: "kitchenChecklists" };
+const KEYS = { profiles: "profiles", menu: "menu", orders: "orders", bills: "bills", parties: "parties", checklists: "checklists", kitchenChecklists: "kitchenChecklists", inventoryItems: "inventoryItems", inventoryReports: "inventoryReports" };
 const COLLECTION = "restaurant";
 
 function docRef(key) {
@@ -172,8 +172,10 @@ export default function App() {
   const [parties, setParties] = useState([]);
   const [checklists, setChecklists] = useState([]);
   const [kitchenChecklists, setKitchenChecklists] = useState([]);
+  const [inventoryItems, setInventoryItems] = useState([]);
+  const [inventoryReports, setInventoryReports] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loaded, setLoaded] = useState({ profiles: false, menu: false, orders: false, bills: false, parties: false, checklists: false, kitchenChecklists: false });
+  const [loaded, setLoaded] = useState({ profiles: false, menu: false, orders: false, bills: false, parties: false, checklists: false, kitchenChecklists: false, inventoryItems: false, inventoryReports: false });
   const [currentUser, setCurrentUser] = useState(null);
   const [syncedAt, setSyncedAt] = useState(null);
   const [globalView, setGlobalView] = useState("home");
@@ -192,6 +194,8 @@ export default function App() {
       subscribe(KEYS.parties, (v) => { setParties(v); markLoaded("parties"); setSyncedAt(new Date()); }),
       subscribe(KEYS.checklists, (v) => { setChecklists(v); markLoaded("checklists"); setSyncedAt(new Date()); }),
       subscribe(KEYS.kitchenChecklists, (v) => { setKitchenChecklists(v); markLoaded("kitchenChecklists"); setSyncedAt(new Date()); }),
+      subscribe(KEYS.inventoryItems, (v) => { setInventoryItems(v); markLoaded("inventoryItems"); setSyncedAt(new Date()); }),
+      subscribe(KEYS.inventoryReports, (v) => { setInventoryReports(v); markLoaded("inventoryReports"); setSyncedAt(new Date()); }),
     ];
     return () => unsubs.forEach((u) => u());
   }, []);
@@ -212,7 +216,9 @@ export default function App() {
     bills: (n) => { setBills(n); persistToFirestore(KEYS.bills, n); },
     parties: (n) => { setParties(n); persistToFirestore(KEYS.parties, n); },
     checklists: (n) => { setChecklists(n); persistToFirestore(KEYS.checklists, n); },
-    kitchenChecklists: (n) => { setKitchenChecklists(n); persistToFirestore(KEYS.kitchenChecklists, n); } };
+    kitchenChecklists: (n) => { setKitchenChecklists(n); persistToFirestore(KEYS.kitchenChecklists, n); },
+    inventoryItems: (n) => { setInventoryItems(n); persistToFirestore(KEYS.inventoryItems, n); },
+    inventoryReports: (n) => { setInventoryReports(n); persistToFirestore(KEYS.inventoryReports, n); } };
 
   // Every role can take orders like a server, not just server logins. Server
   // accounts always land straight on order-taking (that's their whole job);
@@ -277,6 +283,8 @@ export default function App() {
                   parties={parties} setParties={persist.parties}
                   checklists={checklists} setChecklists={persist.checklists}
                   kitchenChecklists={kitchenChecklists} setKitchenChecklists={persist.kitchenChecklists}
+                  inventoryItems={inventoryItems} setInventoryItems={persist.inventoryItems}
+                  inventoryReports={inventoryReports} setInventoryReports={persist.inventoryReports}
                 />
               )}
               {currentUser.role === "chef" && (
@@ -1179,10 +1187,10 @@ function AvailabilityBoard({ menu, setMenu }) {
 // ---------------------------------------------------------------------------
 // ADMIN DASHBOARD (owner / manager)
 // ---------------------------------------------------------------------------
-function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, orders, setOrders, bills, setBills, parties, setParties, checklists, setChecklists, kitchenChecklists, setKitchenChecklists }) {
+function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, orders, setOrders, bills, setBills, parties, setParties, checklists, setChecklists, kitchenChecklists, setKitchenChecklists, inventoryItems, setInventoryItems, inventoryReports, setInventoryReports }) {
   const missingWeekends = countMissingWeekendChecklists(checklists);
   const missingKitchenWeekends = countMissingWeekendChecklists(kitchenChecklists);
-  const tabsBase = [["dashboard", "Dashboard", LayoutDashboard], ["menu", "Menu", UtensilsCrossed], ["orders", "Orders", Clock], ["billing", "Billing", Receipt], ["history", "Bill History", History], ["parties", "Parties", PartyPopper], ["checklist", "Checklist", ListChecks, missingWeekends]];
+  const tabsBase = [["dashboard", "Dashboard", LayoutDashboard], ["menu", "Menu", UtensilsCrossed], ["orders", "Orders", Clock], ["billing", "Billing", Receipt], ["history", "Bill History", History], ["parties", "Parties", PartyPopper], ["checklist", "Checklist", ListChecks, missingWeekends], ["inventory", "Inventory", Package]];
   const tabs = currentUser.role === "owner"
     ? [...tabsBase, ["kitchenChecklist", "Kitchen Checklist", ChefHat, missingKitchenWeekends], ["staff", "Staff", Users]]
     : tabsBase;
@@ -1208,6 +1216,7 @@ function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, ord
         {tab === "history" && <BillHistory bills={bills} parties={parties} />}
         {tab === "parties" && <PartyBookings parties={parties} setParties={setParties} currentUser={currentUser} />}
         {tab === "checklist" && <ChecklistModule checklists={checklists} setChecklists={setChecklists} currentUser={currentUser} />}
+        {tab === "inventory" && <InventoryModule items={inventoryItems} setItems={setInventoryItems} reports={inventoryReports} setReports={setInventoryReports} currentUser={currentUser} />}
         {tab === "kitchenChecklist" && currentUser.role === "owner" && <KitchenChecklistModule checklists={kitchenChecklists} setChecklists={setKitchenChecklists} currentUser={currentUser} />}
         {tab === "staff" && currentUser.role === "owner" && <StaffManager profiles={profiles} setProfiles={setProfiles} currentUser={currentUser} />}
       </div>
@@ -2975,6 +2984,297 @@ function KitchenChecklistDetailModal({ submission, onClose }) {
               </div>
             );
           })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FARM INVENTORY — item catalog + monthly count reports (owner + manager)
+// ---------------------------------------------------------------------------
+function inventoryMonthKey(dateStr) { return dateStr.slice(0, 7); }
+function inventoryMonthLabel(dateStr) {
+  const [y, m] = dateStr.split("-");
+  return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+}
+
+function InventoryModule({ items, setItems, reports, setReports, currentUser }) {
+  const [subTab, setSubTab] = useState("report");
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <Package className="text-[#C9A66B]" size={20} />
+        <h2 className="font-display text-2xl font-600 text-[#16261F]">Farm Inventory</h2>
+      </div>
+      <p className="text-xs font-ui text-[#9C9686] mb-4">Monthly item count, repair &amp; replacement tracking</p>
+
+      <div className="flex gap-1 bg-[#F0EBDD] rounded-full p-1 w-fit mb-5">
+        <button onClick={() => setSubTab("report")}
+          className={`px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide ${subTab === "report" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>
+          This Month
+        </button>
+        <button onClick={() => setSubTab("items")}
+          className={`px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide ${subTab === "items" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>
+          Items
+        </button>
+        <button onClick={() => setSubTab("history")}
+          className={`px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide ${subTab === "history" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>
+          History
+        </button>
+      </div>
+
+      {subTab === "report" && <FillInventoryReport items={items} reports={reports} setReports={setReports} currentUser={currentUser} />}
+      {subTab === "items" && <InventoryItemsManager items={items} setItems={setItems} />}
+      {subTab === "history" && <InventoryHistory reports={reports} />}
+    </div>
+  );
+}
+
+function InventoryItemsManager({ items, setItems }) {
+  const [name, setName] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+
+  const addItem = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setItems([...items, { id: uid(), name: name.trim(), createdAt: new Date().toISOString() }]);
+    setName("");
+  };
+  const startEdit = (item) => { setEditingId(item.id); setEditName(item.name); };
+  const saveEdit = () => {
+    if (!editName.trim()) { setEditingId(null); return; }
+    setItems(items.map((it) => it.id === editingId ? { ...it, name: editName.trim() } : it));
+    setEditingId(null);
+  };
+  const removeItem = (id) => setItems(items.filter((it) => it.id !== id));
+
+  return (
+    <div className="grid md:grid-cols-3 gap-6">
+      <div className="md:col-span-2 bg-white rounded-2xl shadow-sm divide-y divide-[#F0EBDD]">
+        {items.length === 0 && <div className="px-4 py-6 text-sm text-[#9C9686] font-ui text-center">No inventory items yet — add your first one.</div>}
+        {items.map((item) => (
+          <div key={item.id} className="px-4 py-3 flex items-center justify-between gap-2">
+            {editingId === item.id ? (
+              <>
+                <input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
+                  className="flex-1 border border-[#EAE4D3] rounded-lg px-3 py-1.5 text-sm" />
+                <button onClick={saveEdit} className="p-1.5 bg-[#7C8F5E] text-white rounded-full"><Save size={14} /></button>
+                <button onClick={() => setEditingId(null)} className="p-1.5 bg-[#9C9686] text-white rounded-full"><X size={14} /></button>
+              </>
+            ) : (
+              <>
+                <span className="text-sm text-[#16261F] flex-1">{item.name}</span>
+                <button onClick={() => startEdit(item)} className="p-1.5 text-[#5c5648] hover:text-[#16261F]"><Pencil size={14} /></button>
+                <button onClick={() => removeItem(item.id)} className="p-1.5 text-[#C1694F]"><Trash2 size={14} /></button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="bg-white rounded-2xl shadow-md p-4">
+        <div className="font-display text-lg font-600 text-[#16261F] mb-3">Add Item</div>
+        <form onSubmit={addItem} className="space-y-2">
+          <input placeholder="e.g. Tape, Scissors, Khurpi" value={name} onChange={(e) => setName(e.target.value)}
+            className="w-full border border-[#EAE4D3] rounded-xl px-3 py-2.5 text-sm" />
+          <button type="submit" className="w-full bg-[#16261F] text-white py-2.5 rounded-full text-sm font-ui font-semibold uppercase flex items-center justify-center gap-2"><Plus size={16} /> Add Item</button>
+        </form>
+        <p className="text-[11px] text-[#9C9686] font-ui mt-3">Renaming here updates the item going forward — past monthly reports keep the name as it was when filed.</p>
+      </div>
+    </div>
+  );
+}
+
+function FillInventoryReport({ items, reports, setReports, currentUser }) {
+  const [date, setDate] = useState(todayDateStr());
+  const monthOf = inventoryMonthKey(date);
+  const existing = reports.find((r) => inventoryMonthKey(r.date) === monthOf);
+  const priorReport = reports
+    .filter((r) => inventoryMonthKey(r.date) < monthOf)
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
+
+  const buildInitialEntries = () => {
+    if (existing) return existing.entries;
+    const entries = {};
+    items.forEach((it) => {
+      const prior = priorReport?.entries?.[it.id];
+      entries[it.id] = { name: it.name, qty: prior ? prior.qty : 0, repairNeeded: false, newNeeded: false };
+    });
+    return entries;
+  };
+
+  const [entries, setEntries] = useState(buildInitialEntries());
+  const [filledBy, setFilledBy] = useState(existing?.submittedBy || currentUser.name);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  useEffect(() => {
+    setEntries(buildInitialEntries());
+    setFilledBy(existing?.submittedBy || currentUser.name);
+    setSavedMsg("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, items.length]);
+
+  const updateEntry = (itemId, patch) => setEntries((e) => ({
+    ...e,
+    [itemId]: { ...(e[itemId] || { name: items.find((it) => it.id === itemId)?.name || "", qty: 0, repairNeeded: false, newNeeded: false }), ...patch },
+  }));
+
+  const repairCount = Object.values(entries).filter((e) => e.repairNeeded).length;
+  const newCount = Object.values(entries).filter((e) => e.newNeeded).length;
+  const totalQty = Object.values(entries).reduce((s, e) => s + (parseInt(e.qty) || 0), 0);
+
+  const submit = () => {
+    const submission = { id: existing?.id || uid(), date, entries, submittedBy: filledBy.trim() || currentUser.name, submittedAt: new Date().toISOString() };
+    setReports(existing ? reports.map((r) => r.id === existing.id ? submission : r) : [...reports, submission]);
+    setSavedMsg(existing ? "Report updated." : "Report submitted.");
+    setTimeout(() => setSavedMsg(""), 3000);
+  };
+
+  if (items.length === 0) {
+    return <p className="text-sm text-[#9C9686] font-ui">No inventory items yet — add some in the "Items" tab first.</p>;
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <div>
+          <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium block mb-1">Report Date</label>
+          <input type="date" value={date} max={todayDateStr()} onChange={(e) => setDate(e.target.value)}
+            className="border border-[#EAE4D3] bg-white rounded-xl px-3 py-2.5 text-sm font-ticket shadow-sm" />
+        </div>
+        <div className="flex-1 min-w-[160px]">
+          <label className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686] font-medium block mb-1">Filled By</label>
+          <input value={filledBy} onChange={(e) => setFilledBy(e.target.value)}
+            className="w-full border border-[#EAE4D3] bg-white rounded-xl px-3 py-2.5 text-sm shadow-sm" />
+        </div>
+        <div className="bg-white rounded-xl px-4 py-2.5 shadow-sm">
+          <span className="font-display text-lg font-600 text-[#16261F]">{totalQty}</span>
+          <span className="text-[10px] font-ui text-[#9C9686] uppercase tracking-widest ml-1">total qty</span>
+        </div>
+        {repairCount > 0 && (
+          <div className="bg-[#C9A66B]/10 border border-[#C9A66B]/30 rounded-xl px-4 py-2.5">
+            <span className="font-display text-lg font-600 text-[#8a6f42]">{repairCount}</span>
+            <span className="text-[10px] font-ui text-[#8a6f42] uppercase tracking-widest ml-1">repair</span>
+          </div>
+        )}
+        {newCount > 0 && (
+          <div className="bg-[#C1694F]/10 border border-[#C1694F]/30 rounded-xl px-4 py-2.5">
+            <span className="font-display text-lg font-600 text-[#C1694F]">{newCount}</span>
+            <span className="text-[10px] font-ui text-[#C1694F] uppercase tracking-widest ml-1">new needed</span>
+          </div>
+        )}
+      </div>
+
+      <div className="mb-3 font-display text-base font-600 text-[#16261F]">{inventoryMonthLabel(date)}</div>
+
+      {existing ? (
+        <p className="text-xs font-ui text-[#8a6f42] mb-3 bg-[#C9A66B]/10 border border-[#C9A66B]/30 rounded-xl px-3 py-2">
+          A report for this month already exists (filled by {existing.submittedBy}) — saving will update it, not duplicate it.
+        </p>
+      ) : priorReport ? (
+        <p className="text-xs font-ui text-[#5c8fa3] mb-3 bg-[#5B8FA3]/10 border border-[#5B8FA3]/30 rounded-xl px-3 py-2">
+          Quantities carried forward from {inventoryMonthLabel(priorReport.date)} — adjust to match today's actual count.
+        </p>
+      ) : null}
+
+      <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+        <div className="grid grid-cols-[1fr_70px_90px_90px] gap-2 px-4 py-2.5 bg-[#F0EBDD] text-[9px] font-ui uppercase tracking-widest text-[#5c5648] font-medium">
+          <span>Item</span><span>Qty</span><span>Repair</span><span>New</span>
+        </div>
+        <div className="divide-y divide-[#F0EBDD]">
+          {items.map((item) => {
+            const entry = entries[item.id] || { qty: 0, repairNeeded: false, newNeeded: false };
+            return (
+              <div key={item.id} className="grid grid-cols-[1fr_70px_90px_90px] gap-2 px-4 py-2.5 items-center text-sm">
+                <span className="text-[#16261F] truncate">{item.name}</span>
+                <input type="text" inputMode="numeric" value={entry.qty ?? 0}
+                  onChange={(e) => updateEntry(item.id, { name: item.name, qty: e.target.value.replace(/\D/g, "") })}
+                  className="w-14 border border-[#EAE4D3] rounded-lg px-2 py-1 text-xs font-ticket text-center" />
+                <label className="flex items-center justify-center cursor-pointer">
+                  <input type="checkbox" checked={!!entry.repairNeeded} onChange={(e) => updateEntry(item.id, { name: item.name, repairNeeded: e.target.checked })}
+                    className="w-4 h-4" style={{ accentColor: "#C9A66B" }} />
+                </label>
+                <label className="flex items-center justify-center cursor-pointer">
+                  <input type="checkbox" checked={!!entry.newNeeded} onChange={(e) => updateEntry(item.id, { name: item.name, newNeeded: e.target.checked })}
+                    className="w-4 h-4" style={{ accentColor: "#C1694F" }} />
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex flex-col items-center mt-6 mb-4 no-print">
+        <button onClick={submit} className="bg-[#16261F] text-white px-8 py-3 rounded-full text-sm font-ui font-semibold uppercase tracking-wide shadow-2xl flex items-center gap-2">
+          <Check size={16} /> {existing ? "Update Report" : "Submit Report"}
+        </button>
+        {savedMsg && <p className="text-xs font-ui text-[#7C8F5E] mt-2">{savedMsg}</p>}
+      </div>
+    </div>
+  );
+}
+
+function InventoryHistory({ reports }) {
+  const [viewing, setViewing] = useState(null);
+  const sorted = [...reports].sort((a, b) => b.date.localeCompare(a.date));
+
+  return (
+    <div>
+      <div className="font-display text-lg font-600 text-[#16261F] mb-3">Monthly Reports</div>
+      <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+        <div className="grid grid-cols-[1fr_1fr_60px_60px] gap-2 px-4 py-2.5 bg-[#F0EBDD] text-[9px] font-ui uppercase tracking-widest text-[#5c5648] font-medium">
+          <span>Month</span><span>Filled By</span><span>Repair</span><span>New</span>
+        </div>
+        <div className="divide-y divide-[#F0EBDD] max-h-[60vh] overflow-y-auto">
+          {sorted.length === 0 && <div className="px-4 py-6 text-sm text-[#9C9686] font-ui text-center">No reports submitted yet.</div>}
+          {sorted.map((r) => {
+            const repairCount = Object.values(r.entries).filter((e) => e.repairNeeded).length;
+            const newCount = Object.values(r.entries).filter((e) => e.newNeeded).length;
+            return (
+              <button key={r.id} onClick={() => setViewing(r)} className="w-full grid grid-cols-[1fr_1fr_60px_60px] gap-2 px-4 py-2.5 items-center text-sm text-left hover:bg-[#FAF8F2]">
+                <span className="text-[#16261F] font-medium">{inventoryMonthLabel(r.date)}</span>
+                <span className="text-[#5c5648] truncate">{r.submittedBy}</span>
+                <span className={`font-ticket text-xs ${repairCount > 0 ? "text-[#8a6f42] font-semibold" : "text-[#9C9686]"}`}>{repairCount || "—"}</span>
+                <span className={`font-ticket text-xs ${newCount > 0 ? "text-[#C1694F] font-semibold" : "text-[#9C9686]"}`}>{newCount || "—"}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {viewing && <InventoryReportDetailModal report={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+function InventoryReportDetailModal({ report, onClose }) {
+  const items = Object.values(report.entries);
+  return (
+    <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center px-4 py-8" onClick={onClose}>
+      <div className="bg-white rounded-3xl w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 sticky top-0 bg-white border-b border-[#F0EBDD] flex justify-between items-center z-10">
+          <div>
+            <div className="font-display text-xl font-600 text-[#16261F]">{inventoryMonthLabel(report.date)}</div>
+            <div className="text-[10px] font-ui uppercase tracking-widest text-[#9C9686]">Filled by {report.submittedBy}</div>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-[#F0EBDD] rounded-full shrink-0"><X size={18} /></button>
+        </div>
+        <div className="p-5">
+          <div className="grid grid-cols-[1fr_50px_60px_60px] gap-2 px-2 py-2 text-[9px] font-ui uppercase tracking-widest text-[#9C9686] font-medium border-b border-[#F0EBDD]">
+            <span>Item</span><span>Qty</span><span>Repair</span><span>New</span>
+          </div>
+          <div className="divide-y divide-[#F0EBDD]">
+            {items.map((e, i) => (
+              <div key={i} className="grid grid-cols-[1fr_50px_60px_60px] gap-2 px-2 py-2 items-center text-sm">
+                <span className="text-[#16261F]">{e.name}</span>
+                <span className="font-ticket text-xs text-[#5c5648]">{e.qty}</span>
+                <span className="flex justify-center">{e.repairNeeded ? <Wrench size={13} className="text-[#8a6f42]" /> : <span className="text-[#DCD5C0]">—</span>}</span>
+                <span className="flex justify-center">{e.newNeeded ? <Package size={13} className="text-[#C1694F]" /> : <span className="text-[#DCD5C0]">—</span>}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
