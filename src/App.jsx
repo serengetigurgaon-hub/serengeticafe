@@ -748,11 +748,11 @@ function NavTabs({ tabs, current, onChange }) {
           </button>
         ))}
       </div>
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-[#F0EBDD] shadow-[0_-4px_24px_rgba(0,0,0,0.1)] flex justify-around py-1.5 no-print" style={{ paddingBottom: "max(0.4rem, env(safe-area-inset-bottom))" }}>
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-[#F0EBDD] shadow-[0_-4px_24px_rgba(0,0,0,0.1)] flex overflow-x-auto scrollbar-none py-1.5 no-print" style={{ paddingBottom: "max(0.4rem, env(safe-area-inset-bottom))", WebkitOverflowScrolling: "touch" }}>
         {tabs.map(([key, label, Icon, badge]) => (
-          <button key={key} onClick={() => onChange(key)} className="relative flex flex-col items-center gap-0.5 px-3 py-1.5">
+          <button key={key} onClick={() => onChange(key)} className="relative flex flex-col items-center gap-0.5 px-3.5 py-1.5 shrink-0">
             <Icon size={20} className={current === key ? "text-[#C9A66B]" : "text-[#9C9686]"} />
-            <span className={`text-[9px] font-ui uppercase tracking-wide ${current === key ? "text-[#16261F] font-semibold" : "text-[#9C9686]"}`}>{label}</span>
+            <span className={`text-[9px] font-ui uppercase tracking-wide whitespace-nowrap ${current === key ? "text-[#16261F] font-semibold" : "text-[#9C9686]"}`}>{label}</span>
             {!!badge && <span className="absolute top-0 right-1 bg-[#C1694F] text-white text-[8px] font-ui font-bold w-3.5 h-3.5 rounded-full flex items-center justify-center">{badge}</span>}
           </button>
         ))}
