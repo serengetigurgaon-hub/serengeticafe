@@ -1192,7 +1192,7 @@ function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, ord
   const missingKitchenWeekends = countMissingWeekendChecklists(kitchenChecklists);
   const tabsBase = [["dashboard", "Dashboard", LayoutDashboard], ["menu", "Menu", UtensilsCrossed], ["orders", "Orders", Clock], ["billing", "Billing", Receipt], ["history", "Bill History", History], ["parties", "Parties", PartyPopper], ["checklist", "Checklist", ListChecks, missingWeekends], ["inventory", "Inventory", Package]];
   const tabs = currentUser.role === "owner"
-    ? [...tabsBase, ["kitchenChecklist", "Kitchen Checklist", ChefHat, missingKitchenWeekends], ["staff", "Staff", Users]]
+    ? [...tabsBase, ["chefTasks", "Chef Tasks", ChefHat, missingKitchenWeekends], ["staff", "Staff", Users]]
     : tabsBase;
   const [tab, setTab] = useState("dashboard");
 
@@ -1217,7 +1217,10 @@ function AdminDashboard({ currentUser, profiles, setProfiles, menu, setMenu, ord
         {tab === "parties" && <PartyBookings parties={parties} setParties={setParties} currentUser={currentUser} />}
         {tab === "checklist" && <ChecklistModule checklists={checklists} setChecklists={setChecklists} currentUser={currentUser} />}
         {tab === "inventory" && <InventoryModule items={inventoryItems} setItems={setInventoryItems} reports={inventoryReports} setReports={setInventoryReports} currentUser={currentUser} />}
-        {tab === "kitchenChecklist" && currentUser.role === "owner" && <KitchenChecklistModule checklists={kitchenChecklists} setChecklists={setKitchenChecklists} currentUser={currentUser} />}
+        {tab === "chefTasks" && currentUser.role === "owner" && (
+          <ChefDashboard orders={orders} setOrders={setOrders} menu={menu} setMenu={setMenu}
+            kitchenChecklists={kitchenChecklists} setKitchenChecklists={setKitchenChecklists} currentUser={currentUser} />
+        )}
         {tab === "staff" && currentUser.role === "owner" && <StaffManager profiles={profiles} setProfiles={setProfiles} currentUser={currentUser} />}
       </div>
     </div>
