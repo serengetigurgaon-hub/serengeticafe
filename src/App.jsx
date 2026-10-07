@@ -1912,10 +1912,15 @@ function PartyBookings({ parties, setParties, currentUser }) {
       </div>
 
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           <button onClick={() => setAnchor(view === "week" ? addDays(anchor, -7) : new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1))} className="p-2 bg-white rounded-full shadow-sm"><ChevronLeft size={16} /></button>
           <button onClick={() => setAnchor(new Date())} className="px-3 py-2 bg-white rounded-full shadow-sm text-xs font-ui font-medium uppercase">Today</button>
           <button onClick={() => setAnchor(view === "week" ? addDays(anchor, 7) : new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1))} className="p-2 bg-white rounded-full shadow-sm"><ChevronRight size={16} /></button>
+          <span className="font-display text-base font-600 text-[#16261F] ml-1">
+            {view === "month"
+              ? anchor.toLocaleDateString("en-IN", { month: "long", year: "numeric" })
+              : `${startOfWeek(anchor).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} – ${addDays(startOfWeek(anchor), 6).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`}
+          </span>
         </div>
         <div className="flex gap-1 bg-[#F0EBDD] rounded-full p-1">
           <button onClick={() => setView("week")} className={`px-4 py-1.5 rounded-full text-xs font-ui font-medium uppercase tracking-wide ${view === "week" ? "bg-[#16261F] text-white" : "text-[#5c5648]"}`}>Week</button>
