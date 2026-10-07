@@ -1850,8 +1850,26 @@ const PARTY_SLOTS = [
 ];
 const PACKAGES = { standard: "Standard", premium: "Premium" };
 
-function todayDateStr() { return new Date().toISOString().slice(0, 10); }
-function toDateStr(d) { return d.toISOString().slice(0, 10); }
+// Build the YYYY-MM-DD string from the Date object's LOCAL calendar date.
+// (Date.toISOString() converts to UTC first, which shifts the date back a
+// day for anyone east of UTC-0 once local midnight is involved — e.g. for
+// IST (UTC+5:30), local midnight on 7 Oct is 18:30 UTC on 6 Oct, so
+// toISOString() incorrectly produced "2026-10-06" for a cell that was
+// clearly showing the 7th. Using local components avoids that entirely.)
+function toDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function todayDateStr() { return toDateStr(new Date()); }
+// Parse a "YYYY-MM-DD" string as a LOCAL date (midnight local time), not
+// UTC — `new Date("2026-10-07")` parses as UTC midnight, which is a
+// different moment than local midnight and can land on the wrong local day.
+function parseDateStr(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
 function startOfWeek(d) { const x = new Date(d); const day = x.getDay(); x.setDate(x.getDate() - day); x.setHours(0, 0, 0, 0); return x; }
 function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
 function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
@@ -2012,7 +2030,7 @@ function MonthView({ anchor, parties, onSelectDay, onSelectBooking, onBookSlot }
         <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center px-4" onClick={() => setExpandedDate(null)}>
           <div className="bg-white rounded-3xl p-5 w-full max-w-sm shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-3">
-              <p className="font-display text-lg font-600 text-[#16261F]">{new Date(expandedDate).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+              <p className="font-display text-lg font-600 text-[#16261F]">{parseDateStr(expandedDate).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
               <button onClick={() => setExpandedDate(null)} className="p-1 hover:bg-[#F0EBDD] rounded-full"><X size={18} /></button>
             </div>
             <div className="space-y-2">
@@ -2038,7 +2056,7 @@ function MonthView({ anchor, parties, onSelectDay, onSelectBooking, onBookSlot }
                 );
               })}
             </div>
-            <button onClick={() => { onSelectDay(new Date(expandedDate)); setExpandedDate(null); }}
+            <button onClick={() => { onSelectDay(parseDateStr(expandedDate)); setExpandedDate(null); }}
               className="w-full mt-4 bg-[#F0EBDD] text-[#16261F] py-2.5 rounded-full text-xs font-ui font-semibold uppercase tracking-wide">
               View Full Week
             </button>
