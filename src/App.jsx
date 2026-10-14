@@ -1846,7 +1846,6 @@ function BillHistory({ bills, parties }) {
 const PARTY_SLOTS = [
   { id: "11-2", label: "11:00 AM – 2:00 PM" },
   { id: "3-6", label: "3:00 PM – 6:00 PM" },
-  { id: "5-8", label: "5:00 PM – 8:00 PM" },
 ];
 const PACKAGES = { standard: "Standard", premium: "Premium" };
 
